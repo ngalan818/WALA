@@ -251,7 +251,7 @@ public class ECJSourceModuleTranslator implements SourceModuleTranslator {
     @SuppressWarnings("deprecation")
     final ASTParser parser = ASTParser.newParser(AST.JLS8);
     parser.setResolveBindings(true);
-    parser.setEnvironment(libs, this.sources, null, false);
+    parser.setEnvironment(libs, this.sources, null, true);
     Hashtable<String, String> options = JavaCore.getOptions();
     options.put(JavaCore.COMPILER_SOURCE, "1.8");
     parser.setCompilerOptions(options);
