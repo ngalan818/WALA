@@ -154,4 +154,9 @@ public class SSAAddressOfInstruction extends SSAInstruction {
       return indexVal;
     }
   }
+
+  @Override
+  public String[] useNames() {
+    return indexVal == -1 ? new String[] {"address"} : new String[] {"address", "index"};
+  }
 }

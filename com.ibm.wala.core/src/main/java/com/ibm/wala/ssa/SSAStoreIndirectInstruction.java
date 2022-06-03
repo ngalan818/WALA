@@ -70,4 +70,9 @@ public class SSAStoreIndirectInstruction extends SSAInstruction {
   public void visit(IVisitor v) {
     ((IVisitorWithAddresses) v).visitStoreIndirect(this);
   }
+
+  @Override
+  public String[] useNames() {
+    return new String[] {"address", "value"};
+  }
 }

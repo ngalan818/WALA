@@ -272,4 +272,12 @@ public abstract class SSAInstruction {
   public void setInstructionIndex(int instructionIndex) {
     this.instructionIndex = instructionIndex;
   }
+
+  public String[] useNames() {
+    String[] args = new String[getNumberOfUses()];
+    for (int i = 0; i < getNumberOfUses(); i++) {
+      args[i] = "argument" + i;
+    }
+    return args;
+  }
 }

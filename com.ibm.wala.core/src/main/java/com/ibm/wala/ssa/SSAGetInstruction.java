@@ -99,11 +99,14 @@ public abstract class SSAGetInstruction extends SSAFieldAccessInstruction {
     return result * 2371 + 6521;
   }
 
-  /*
-   * @see com.ibm.wala.ssa.Instruction#isFallThrough()
-   */
+  /** @see com.ibm.wala.ssa.SSAInstruction#isFallThrough() */
   @Override
   public boolean isFallThrough() {
     return true;
+  }
+
+  @Override
+  public String[] useNames() {
+    return new String[] {"object"};
   }
 }

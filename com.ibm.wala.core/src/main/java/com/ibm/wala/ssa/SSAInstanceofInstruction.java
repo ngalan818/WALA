@@ -99,9 +99,6 @@ public class SSAInstanceofInstruction extends SSAInstruction {
     return ref * 677 ^ result * 3803;
   }
 
-  /*
-   * @see com.ibm.wala.ssa.Instruction#isFallThrough()
-   */
   @Override
   public boolean isFallThrough() {
     return true;
@@ -109,5 +106,10 @@ public class SSAInstanceofInstruction extends SSAInstruction {
 
   public int getRef() {
     return ref;
+  }
+
+  @Override
+  public String[] useNames() {
+    return new String[] {"object"};
   }
 }

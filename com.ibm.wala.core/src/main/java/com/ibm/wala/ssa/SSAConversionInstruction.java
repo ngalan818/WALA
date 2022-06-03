@@ -91,11 +91,13 @@ public abstract class SSAConversionInstruction extends SSAInstruction {
     return 6311 * result ^ val;
   }
 
-  /*
-   * @see com.ibm.wala.ssa.Instruction#isFallThrough()
-   */
   @Override
   public boolean isFallThrough() {
     return true;
+  }
+
+  @Override
+  public String[] useNames() {
+    return new String[] {"object"};
   }
 }

@@ -63,17 +63,11 @@ public abstract class SSAMonitorInstruction extends SSAInstruction {
     return ref * 6173 + 4423;
   }
 
-  /*
-   * @see com.ibm.wala.ssa.Instruction#isPEI()
-   */
   @Override
   public boolean isPEI() {
     return true;
   }
 
-  /*
-   * @see com.ibm.wala.ssa.Instruction#isFallThrough()
-   */
   @Override
   public boolean isFallThrough() {
     return true;
@@ -87,5 +81,10 @@ public abstract class SSAMonitorInstruction extends SSAInstruction {
   /** Does this instruction represent a monitorenter? */
   public boolean isMonitorEnter() {
     return isEnter;
+  }
+
+  @Override
+  public String[] useNames() {
+    return new String[] {"object"};
   }
 }

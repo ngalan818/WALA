@@ -54,4 +54,9 @@ public class SSALoadIndirectInstruction extends SSAAbstractUnaryInstruction {
   public void visit(IVisitor v) {
     ((IVisitorWithAddresses) v).visitLoadIndirect(this);
   }
+
+  @Override
+  public String[] useNames() {
+    return new String[] {"address"};
+  }
 }

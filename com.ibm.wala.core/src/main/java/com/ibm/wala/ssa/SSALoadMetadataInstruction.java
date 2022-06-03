@@ -107,4 +107,9 @@ public abstract class SSALoadMetadataInstruction extends SSAInstruction {
   public TypeReference getType() {
     return entityType;
   }
+
+  @Override
+  public String[] useNames() {
+    return new String[0];
+  }
 }
