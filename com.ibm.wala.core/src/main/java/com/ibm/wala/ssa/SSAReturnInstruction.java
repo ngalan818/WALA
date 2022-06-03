@@ -94,4 +94,9 @@ public class SSAReturnInstruction extends SSAInstruction {
   public boolean isFallThrough() {
     return false;
   }
+
+  @Override
+  public String[] useNames() {
+    return result == -1 ? new String[0] : new String[] {"value"};
+  }
 }

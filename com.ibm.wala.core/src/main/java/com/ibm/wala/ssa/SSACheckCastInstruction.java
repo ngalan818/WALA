@@ -166,4 +166,9 @@ public abstract class SSACheckCastInstruction extends SSAInstruction {
     }
     return s.toString();
   }
+
+  @Override
+  public String[] useNames() {
+    return new String[] {"object"};
+  }
 }

@@ -54,4 +54,9 @@ public class SSAGotoInstruction extends SSAInstruction {
   public boolean isFallThrough() {
     return false;
   }
+
+  @Override
+  public String[] useNames() {
+    return new String[0];
+  }
 }

@@ -58,4 +58,9 @@ public class SSAUnaryOpInstruction extends SSAAbstractUnaryInstruction {
   public IUnaryOpInstruction.IOperator getOpcode() {
     return operator;
   }
+
+  @Override
+  public String[] useNames() {
+    return new String[] {"op"};
+  }
 }

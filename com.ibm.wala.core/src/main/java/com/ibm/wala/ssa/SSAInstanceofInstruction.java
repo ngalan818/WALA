@@ -107,4 +107,9 @@ public class SSAInstanceofInstruction extends SSAInstruction {
   public int getRef() {
     return ref;
   }
+
+  @Override
+  public String[] useNames() {
+    return new String[] {"object"};
+  }
 }

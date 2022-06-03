@@ -95,4 +95,9 @@ public abstract class SSAConversionInstruction extends SSAInstruction {
   public boolean isFallThrough() {
     return true;
   }
+
+  @Override
+  public String[] useNames() {
+    return new String[] {"object"};
+  }
 }

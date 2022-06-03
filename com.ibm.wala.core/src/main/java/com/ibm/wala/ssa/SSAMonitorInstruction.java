@@ -82,4 +82,9 @@ public abstract class SSAMonitorInstruction extends SSAInstruction {
   public boolean isMonitorEnter() {
     return isEnter;
   }
+
+  @Override
+  public String[] useNames() {
+    return new String[] {"object"};
+  }
 }

@@ -107,4 +107,9 @@ public class SSAPiInstruction extends SSAUnaryOpInstruction {
   public int getVal() {
     return getUse(0);
   }
+
+  @Override
+  public String[] useNames() {
+    return new String[] {"value"};
+  }
 }

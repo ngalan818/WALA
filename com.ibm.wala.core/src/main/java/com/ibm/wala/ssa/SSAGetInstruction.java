@@ -104,4 +104,9 @@ public abstract class SSAGetInstruction extends SSAFieldAccessInstruction {
   public boolean isFallThrough() {
     return true;
   }
+
+  @Override
+  public String[] useNames() {
+    return new String[] {"object"};
+  }
 }

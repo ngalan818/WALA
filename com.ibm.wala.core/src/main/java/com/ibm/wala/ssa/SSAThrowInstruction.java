@@ -35,4 +35,9 @@ public abstract class SSAThrowInstruction extends SSAAbstractThrowInstruction {
   public void visit(IVisitor v) throws NullPointerException {
     v.visitThrow(this);
   }
+
+  @Override
+  public String[] useNames() {
+    return new String[] {"exception"};
+  }
 }

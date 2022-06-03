@@ -101,4 +101,9 @@ public abstract class SSAArrayLengthInstruction extends SSAInstruction {
   public boolean isFallThrough() {
     return true;
   }
+
+  @Override
+  public String[] useNames() {
+    return new String[] {"array"};
+  }
 }

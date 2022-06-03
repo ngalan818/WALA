@@ -84,4 +84,9 @@ public abstract class SSAArrayStoreInstruction extends SSAArrayReferenceInstruct
   public int hashCode() {
     return 6311 * value ^ 2371 * getArrayRef() + getIndex();
   }
+
+  @Override
+  public String[] useNames() {
+    return new String[] {"array", "index", "value"};
+  }
 }

@@ -77,4 +77,9 @@ public abstract class SSABinaryOpInstruction extends SSAAbstractBinaryInstructio
   public boolean mayBeIntegerOp() {
     return mayBeInteger;
   }
+
+  @Override
+  public String[] useNames() {
+    return new String[] {"left", "right"};
+  }
 }

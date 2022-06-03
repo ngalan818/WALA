@@ -127,4 +127,9 @@ public class SSASwitchInstruction extends SSAInstruction {
   public boolean isFallThrough() {
     return false;
   }
+
+  @Override
+  public String[] useNames() {
+    return new String[] {"value"};
+  }
 }

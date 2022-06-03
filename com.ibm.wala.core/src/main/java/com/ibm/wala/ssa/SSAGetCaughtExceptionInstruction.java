@@ -92,4 +92,9 @@ public class SSAGetCaughtExceptionInstruction extends SSAInstruction {
   public boolean isFallThrough() {
     return true;
   }
+
+  @Override
+  public String[] useNames() {
+    return new String[0];
+  }
 }

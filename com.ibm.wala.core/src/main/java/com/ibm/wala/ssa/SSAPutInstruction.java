@@ -92,4 +92,9 @@ public abstract class SSAPutInstruction extends SSAFieldAccessInstruction {
   public boolean isFallThrough() {
     return true;
   }
+
+  @Override
+  public String[] useNames() {
+    return new String[] {"object", "value"};
+  }
 }

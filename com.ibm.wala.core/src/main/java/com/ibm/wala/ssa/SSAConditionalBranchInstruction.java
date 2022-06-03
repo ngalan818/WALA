@@ -123,4 +123,9 @@ public class SSAConditionalBranchInstruction extends SSAInstruction {
   public boolean isFallThrough() {
     return true;
   }
+
+  @Override
+  public String[] useNames() {
+    return new String[] {"left", "right"};
+  }
 }

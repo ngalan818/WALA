@@ -110,4 +110,9 @@ public class SSAComparisonInstruction extends SSAInstruction {
   public IComparisonInstruction.Operator getOperator() {
     return operator;
   }
+
+  @Override
+  public String[] useNames() {
+    return new String[] {"left", "right"};
+  }
 }
