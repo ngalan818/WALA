@@ -95,6 +95,10 @@ public abstract class SSAPutInstruction extends SSAFieldAccessInstruction {
 
   @Override
   public String[] useNames() {
-    return new String[] {"object", "value"};
+    if (isStatic()) {
+      return new String[] {"value"};
+    } else {
+      return new String[] {"object", "value"};
+    }
   }
 }

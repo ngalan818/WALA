@@ -107,6 +107,10 @@ public abstract class SSAGetInstruction extends SSAFieldAccessInstruction {
 
   @Override
   public String[] useNames() {
-    return new String[] {"object"};
+    if (isStatic()) {
+      return new String[0];
+    } else {
+      return new String[] {"value"};
+    }
   }
 }
