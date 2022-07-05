@@ -20,7 +20,6 @@ import com.ibm.wala.core.util.warnings.Warning;
 import com.ibm.wala.ipa.cha.IClassHierarchy;
 import com.ibm.wala.types.TypeName;
 import com.ibm.wala.util.collections.HashMapFactory;
-import com.ibm.wala.util.collections.HashSetFactory;
 import java.io.IOException;
 import java.io.Reader;
 import java.util.Collection;
@@ -30,7 +29,7 @@ import java.util.Map;
 import java.util.Set;
 
 /** basic abstract class loader implementation */
-public abstract class CAstAbstractLoader implements IClassLoader {
+public abstract class CAstAbstractLoader implements IClassLoader, SourceLoaderMessages {
 
   /** types loaded by this */
   protected final Map<TypeName, IClass> types = HashMapFactory.make();
@@ -51,42 +50,9 @@ public abstract class CAstAbstractLoader implements IClassLoader {
     this(cha, null);
   }
 
-  private Set<Warning> messagesFor(ModuleEntry module) {
-    if (!errors.containsKey(module)) {
-      errors.put(module, HashSetFactory.make());
-    }
-    return errors.get(module);
-  }
-
-  public void addMessages(ModuleEntry module, Set<Warning> message) {
-    messagesFor(module).addAll(message);
-  }
-
-  public void addMessage(ModuleEntry module, Warning message) {
-    messagesFor(module).add(message);
-  }
-
-  private Iterator<ModuleEntry> getMessages(final byte severity) {
-    return errors.entrySet().stream()
-        .filter(entry -> entry.getValue().stream().anyMatch(w -> w.getLevel() == severity))
-        .map(Map.Entry::getKey)
-        .iterator();
-  }
-
-  public Iterator<ModuleEntry> getModulesWithParseErrors() {
-    return getMessages(Warning.SEVERE);
-  }
-
-  public Iterator<ModuleEntry> getModulesWithWarnings() {
-    return getMessages(Warning.MILD);
-  }
-
-  public Set<Warning> getMessages(ModuleEntry m) {
-    return errors.get(m);
-  }
-
-  public void clearMessages() {
-    errors.clear();
+  @Override
+  public Map<ModuleEntry, Set<Warning>> getErrors() {
+    return errors;
   }
 
   public IClass lookupClass(String className, IClassHierarchy cha) {

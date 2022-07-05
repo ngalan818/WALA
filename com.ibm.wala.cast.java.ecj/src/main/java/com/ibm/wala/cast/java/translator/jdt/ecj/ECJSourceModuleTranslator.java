@@ -49,6 +49,7 @@ import com.ibm.wala.classLoader.JarStreamModule;
 import com.ibm.wala.classLoader.Module;
 import com.ibm.wala.classLoader.ModuleEntry;
 import com.ibm.wala.classLoader.SourceFileModule;
+import com.ibm.wala.core.util.warnings.Warning;
 import com.ibm.wala.ipa.callgraph.AnalysisScope;
 import com.ibm.wala.types.ClassLoaderReference;
 import com.ibm.wala.util.collections.HashMapFactory;
@@ -157,16 +158,33 @@ public class ECJSourceModuleTranslator implements SourceModuleTranslator {
       final Java2IRTranslator java2ir = makeIRTranslator();
       java2ir.translate(sourceMap.get(source), jdt2cast.translateToCAst());
 
-      if (!"true".equals(System.getProperty("wala.jdt.quiet"))) {
-        IProblem[] problems = ast.getProblems();
-        int length = problems.length;
-        if (length > 0) {
+      IProblem[] problems = ast.getProblems();
+      int length = problems.length;
+      if (length > 0) {
+        for (IProblem problem : problems) {
+          sourceLoader.addMessage(
+              sourceMap.get(source),
+              new Warning() {
+                {
+                  setLevel(
+                      problem.isError()
+                          ? Warning.SEVERE
+                          : problem.isWarning() ? Warning.MODERATE : Warning.MILD);
+                }
+
+                @Override
+                public String getMsg() {
+                  return problem.getMessage();
+                }
+              });
+        }
+
+        if (!"true".equals(System.getProperty("wala.jdt.quiet"))) {
           StringBuilder buffer = new StringBuilder();
           for (IProblem problem : problems) {
             buffer.append(problem.getMessage());
             buffer.append('\n');
           }
-          if (length != 0) System.err.println("Unexpected problems in " + source + "\n " + buffer);
         }
       }
     }

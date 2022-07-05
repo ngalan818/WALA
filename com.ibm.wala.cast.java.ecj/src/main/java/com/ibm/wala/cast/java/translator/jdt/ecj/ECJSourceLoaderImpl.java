@@ -39,12 +39,20 @@ package com.ibm.wala.cast.java.translator.jdt.ecj;
 
 import com.ibm.wala.cast.java.loader.JavaSourceLoaderImpl;
 import com.ibm.wala.cast.java.translator.SourceModuleTranslator;
+import com.ibm.wala.cast.loader.SourceLoaderMessages;
 import com.ibm.wala.classLoader.IClassLoader;
+import com.ibm.wala.classLoader.ModuleEntry;
+import com.ibm.wala.core.util.warnings.Warning;
 import com.ibm.wala.ipa.cha.IClassHierarchy;
 import com.ibm.wala.types.ClassLoaderReference;
+import com.ibm.wala.util.collections.HashMapFactory;
+import java.util.Map;
+import java.util.Set;
 
-public class ECJSourceLoaderImpl extends JavaSourceLoaderImpl {
+public class ECJSourceLoaderImpl extends JavaSourceLoaderImpl implements SourceLoaderMessages {
   protected final boolean dump;
+
+  private final Map<ModuleEntry, Set<Warning>> errors = HashMapFactory.make();
 
   public ECJSourceLoaderImpl(
       ClassLoaderReference loaderRef, IClassLoader parent, IClassHierarchy cha) {
@@ -60,5 +68,10 @@ public class ECJSourceLoaderImpl extends JavaSourceLoaderImpl {
   @Override
   protected SourceModuleTranslator getTranslator() {
     return new ECJSourceModuleTranslator(cha.getScope(), this, dump);
+  }
+
+  @Override
+  public Map<ModuleEntry, Set<Warning>> getErrors() {
+    return errors;
   }
 }

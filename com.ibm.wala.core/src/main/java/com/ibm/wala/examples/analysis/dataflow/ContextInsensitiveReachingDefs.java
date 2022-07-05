@@ -103,7 +103,7 @@ public class ContextInsensitiveReachingDefs {
     // generic type ObjectArrayMapping.  It's actually a perfectly good use of Java generic type
     // inference.  ECJ, on the other hand, apparently needs the "unchecked" suppression for some
     // reason.
-    @SuppressWarnings({"rawtypes", "unchecked"})
+    @SuppressWarnings({"unchecked"})
     ObjectArrayMapping<Pair<CGNode, Integer>> result =
         new ObjectArrayMapping<>(putInstrs.toArray(new Pair[0]));
     return result;

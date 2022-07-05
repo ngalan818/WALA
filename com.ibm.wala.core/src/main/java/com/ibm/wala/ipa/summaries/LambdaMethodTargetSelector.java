@@ -151,6 +151,7 @@ public class LambdaMethodTargetSelector implements MethodTargetSelector {
     return summary;
   }
 
+  @SuppressWarnings("unused")
   private static boolean isNonClinitLambdaMetafactoryMethod(
       IClassHierarchy cha, MethodReference target) {
     Atom name = target.getName();
