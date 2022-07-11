@@ -440,9 +440,9 @@ public class JavaCAst2IRTranslator extends AstTranslator {
 
   @Override
   protected void leaveThis(CAstNode n, WalkContext c, CAstVisitor<WalkContext> visitor) {
-    if (n.getChildCount() == 0) {
-      super.leaveThis(n, c, visitor);
-    } else {
+    super.leaveThis(n, c, visitor);
+    if (n.getChildCount() > 0) {
+      int rval = c.getValue(n);
       int result = c.currentScope().allocateTempValue();
       c.setValue(n, result);
       c.cfg()
@@ -450,6 +450,7 @@ public class JavaCAst2IRTranslator extends AstTranslator {
               new EnclosingObjectReference(
                   c.cfg().getCurrentInstruction(),
                   result,
+                  rval,
                   (TypeReference) n.getChild(0).getValue()));
     }
   }

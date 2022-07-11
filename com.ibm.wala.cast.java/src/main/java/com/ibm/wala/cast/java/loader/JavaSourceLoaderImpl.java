@@ -683,8 +683,8 @@ public abstract class JavaSourceLoaderImpl extends ClassLoaderImpl {
 
     @Override
     public com.ibm.wala.cast.java.ssa.EnclosingObjectReference EnclosingObjectReference(
-        int iindex, int lval, TypeReference type) {
-      return new EnclosingObjectReference(iindex, lval, type);
+        int iindex, int lval, int rval, TypeReference type) {
+      return new EnclosingObjectReference(iindex, lval, rval, type);
     }
 
     @Override

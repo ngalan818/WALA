@@ -20,7 +20,8 @@ public interface AstJavaInstructionFactory extends AstInstructionFactory {
   AstJavaInvokeInstruction JavaInvokeInstruction(
       int iindex, int result[], int[] params, int exception, CallSiteReference site);
 
-  EnclosingObjectReference EnclosingObjectReference(int iindex, int lval, TypeReference type);
+  EnclosingObjectReference EnclosingObjectReference(
+      int iindex, int lval, int rval, TypeReference type);
 
   AstJavaNewEnclosingInstruction JavaNewEnclosingInstruction(
       int iindex, int result, NewSiteReference site, int enclosing);

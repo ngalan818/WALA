@@ -30,9 +30,12 @@ public class EnclosingObjectReference extends SSAInstruction {
 
   private final int lval;
 
-  public EnclosingObjectReference(int iindex, int lval, TypeReference type) {
+  private final int rval;
+
+  public EnclosingObjectReference(int iindex, int lval, int rval, TypeReference type) {
     super(iindex);
     this.lval = lval;
+    this.rval = rval;
     this.type = type;
   }
 
@@ -54,6 +57,18 @@ public class EnclosingObjectReference extends SSAInstruction {
   }
 
   @Override
+  public int getNumberOfUses() {
+    return 1;
+  }
+
+  @Override
+  public int getUse(int i) {
+    assert i == 0;
+
+    return rval;
+  }
+
+  @Override
   public int getNumberOfDefs() {
     return 1;
   }
@@ -65,7 +80,8 @@ public class EnclosingObjectReference extends SSAInstruction {
   @Override
   public SSAInstruction copyForSSA(SSAInstructionFactory insts, int[] defs, int[] uses) {
     return ((AstJavaInstructionFactory) insts)
-        .EnclosingObjectReference(iIndex(), defs == null ? lval : defs[0], type);
+        .EnclosingObjectReference(
+            iIndex(), defs == null ? lval : defs[0], uses == null ? rval : uses[0], type);
   }
 
   @Override
