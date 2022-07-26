@@ -440,8 +440,10 @@ public abstract class AbstractInterproceduralCFG<T extends ISSABasicBlock>
 
     if (!constructedFullGraph) {
       for (CGNode n : cg) {
-        addIntraproceduralNodesAndEdgesForCGNodeIfNeeded(n);
-        addEdgesToCallees(n);
+        if (relevant.test(n)) {
+          addIntraproceduralNodesAndEdgesForCGNodeIfNeeded(n);
+          addEdgesToCallees(n);
+        }
       }
       for (int i = 0; i < g.getMaxNumber(); i++) {
         addedSuccs.add(i);
@@ -495,8 +497,8 @@ public abstract class AbstractInterproceduralCFG<T extends ISSABasicBlock>
       if (DEBUG_LEVEL > 1) {
         System.err.println("got Site: " + site);
       }
-      boolean irrelevantTargets = false;
       for (CGNode tn : cg.getPossibleTargets(n, site)) {
+        boolean irrelevantTargets = false;
         if (!relevant.test(tn)) {
           if (DEBUG_LEVEL > 1) {
             System.err.println("Irrelevant target: " + tn);
@@ -517,10 +519,11 @@ public abstract class AbstractInterproceduralCFG<T extends ISSABasicBlock>
           for (Iterator<? extends T> returnBlocks = cfg.getSuccNodes(cbDelegate);
               returnBlocks.hasNext(); ) {
             T retBlock = returnBlocks.next();
-            addEdgesFromExitToReturn(n, retBlock, tn, tcfg);
             if (irrelevantTargets) {
               // Add a "normal" edge from the call block to the return block.
               g.addEdge(callBlock, new BasicBlockInContext<>(n, retBlock));
+            } else {
+              addEdgesFromExitToReturn(n, retBlock, tn, tcfg);
             }
           }
         }
