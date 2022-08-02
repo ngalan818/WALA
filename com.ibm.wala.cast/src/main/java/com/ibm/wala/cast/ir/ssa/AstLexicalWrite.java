@@ -97,4 +97,13 @@ public class AstLexicalWrite extends AstLexicalAccess {
     assert v instanceof AstInstructionVisitor;
     ((AstInstructionVisitor) v).visitAstLexicalWrite(this);
   }
+
+  @Override
+  public String[] useNames() {
+    String[] names = new String[getAccessCount()];
+    for (int i = 0; i < getAccessCount(); i++) {
+      names[i] = getAccess(i).variableName;
+    }
+    return names;
+  }
 }
