@@ -66,11 +66,15 @@ public class SSAConversion extends AbstractSSAConversion {
   // Copy propagation history
   //
 
-  private final Map<Object, CopyPropagationRecord> copyPropagationMap;
+  public interface UseRecord {
+    int getUseNumber();
+  }
+
+  private final Map<UseRecord, CopyPropagationRecord> copyPropagationMap;
 
   private final ArrayList<CopyPropagationRecord> R[];
 
-  public static class UseRecord {
+  public static class NormalUseRecord implements UseRecord {
     final int instructionIndex;
 
     final int useNumber;
@@ -79,11 +83,12 @@ public class SSAConversion extends AbstractSSAConversion {
       return instructionIndex;
     }
 
+    @Override
     public int getUseNumber() {
       return useNumber;
     }
 
-    private UseRecord(int instructionIndex, int useNumber) {
+    public NormalUseRecord(int instructionIndex, int useNumber) {
       this.useNumber = useNumber;
       this.instructionIndex = instructionIndex;
     }
@@ -100,13 +105,13 @@ public class SSAConversion extends AbstractSSAConversion {
 
     @Override
     public boolean equals(Object o) {
-      return (o instanceof UseRecord)
-          && instructionIndex == ((UseRecord) o).instructionIndex
-          && useNumber == ((UseRecord) o).useNumber;
+      return (o instanceof NormalUseRecord)
+          && instructionIndex == ((NormalUseRecord) o).instructionIndex
+          && useNumber == ((NormalUseRecord) o).useNumber;
     }
   }
 
-  public static class PhiUseRecord {
+  public static class PhiUseRecord implements UseRecord {
     final int BBnumber;
 
     final int phiNumber;
@@ -127,6 +132,7 @@ public class SSAConversion extends AbstractSSAConversion {
       return phiNumber;
     }
 
+    @Override
     public int getUseNumber() {
       return useNumber;
     }
@@ -230,7 +236,7 @@ public class SSAConversion extends AbstractSSAConversion {
                 + use
                 + " of instruction #"
                 + instructionIndex));
-      UseRecord rec = new UseRecord(instructionIndex, use);
+      NormalUseRecord rec = new NormalUseRecord(instructionIndex, use);
       copyPropagationMap.put(rec, this);
       renamedUses.add(rec);
     }
@@ -265,8 +271,8 @@ public class SSAConversion extends AbstractSSAConversion {
             ("recreating assignment at " + instructionIndex + " as " + lhs + " = " + rhs));
 
       for (Object x : renamedUses) {
-        if (x instanceof UseRecord) {
-          UseRecord use = (UseRecord) x;
+        if (x instanceof NormalUseRecord) {
+          NormalUseRecord use = (NormalUseRecord) x;
           int idx = use.instructionIndex;
           SSAInstruction inst = instructions[idx];
 
@@ -298,7 +304,7 @@ public class SSAConversion extends AbstractSSAConversion {
 
     public void undo() {
       undo(this.rhs);
-      copyPropagationMap.remove(new UseRecord(instructionIndex, rhs));
+      copyPropagationMap.remove(new NormalUseRecord(instructionIndex, rhs));
     }
   }
 
@@ -348,20 +354,20 @@ public class SSAConversion extends AbstractSSAConversion {
       if (DEBUG_UNDO)
         System.err.println(("undoing for use #" + useNumber + " of inst #" + instructionIndex));
 
-      UseRecord use = new UseRecord(instructionIndex, useNumber);
+      NormalUseRecord use = new NormalUseRecord(instructionIndex, useNumber);
       if (copyPropagationMap.containsKey(use)) {
         copyPropagationMap.get(use).undo();
       }
     }
 
     private void copyUse(int fromInst, int fromUse, int toInst, int toUse) {
-      UseRecord use = new UseRecord(fromInst, fromUse);
+      NormalUseRecord use = new NormalUseRecord(fromInst, fromUse);
       if (copyPropagationMap.containsKey(use)) {
         copyPropagationMap.get(use).addUse(toInst, toUse);
       }
     }
 
-    public Map<Object, CopyPropagationRecord> getCopyHistory() {
+    public Map<UseRecord, CopyPropagationRecord> getCopyHistory() {
       return copyPropagationMap;
     }
 
@@ -369,7 +375,7 @@ public class SSAConversion extends AbstractSSAConversion {
     public String toString() {
       StringBuilder sb = new StringBuilder(super.toString());
 
-      for (Map.Entry<Object, CopyPropagationRecord> x : copyPropagationMap.entrySet()) {
+      for (Map.Entry<UseRecord, CopyPropagationRecord> x : copyPropagationMap.entrySet()) {
         sb.append(x.getKey().toString())
             .append(" --> ")
             .append(x.getValue().toString())
@@ -582,7 +588,7 @@ public class SSAConversion extends AbstractSSAConversion {
   @SuppressWarnings("unchecked")
   private SSAConversion(AstMethod M, AstIRFactory.AstIR ir, SSAOptions options) {
     super(ir, options);
-    Map<Object, CopyPropagationRecord> m = HashMapFactory.make();
+    Map<UseRecord, CopyPropagationRecord> m = HashMapFactory.make();
     this.copyPropagationMap = (ir.getLocalMap() != null) ? ir.getLocalMap().getCopyHistory() : m;
     this.ir = ir;
     this.debugInfo = M.debugInfo();
