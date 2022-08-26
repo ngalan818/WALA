@@ -739,8 +739,8 @@ public abstract class AstTranslator extends CAstVisitor<AstTranslator.WalkContex
       return lastIndex;
     }
 
-    void setLastIndex(int lastIndex) {
-      this.lastIndex = lastIndex;
+    int setLastIndex(int lastIndex) {
+      return this.lastIndex = lastIndex;
     }
 
     void makeExitBlock() {
@@ -1108,7 +1108,7 @@ public abstract class AstTranslator extends CAstVisitor<AstTranslator.WalkContex
           PreBasicBlock src = s.fst;
           boolean exception = s.snd;
           if (unwind == null) {
-            addEdge(src, nodeToBlock.get(n));
+            addEdge(src, fixRealizedGoto(src, nodeToBlock.get(n)));
           } else {
             PreBasicBlock target = nodeToBlock.get(n);
             addEdge(src, unwind.findOrCreateCode(src, target, exception));
@@ -1125,13 +1125,22 @@ public abstract class AstTranslator extends CAstVisitor<AstTranslator.WalkContex
         for (Pair<PreBasicBlock, Boolean> s : delayedEdges.get(exitMarker)) {
           PreBasicBlock src = s.fst;
           boolean exception = s.snd;
-          addEdge(src, exitBlock);
+          addEdge(src, fixRealizedGoto(src, exitBlock));
           if (exception) exceptionalToExit.add(src);
           else normalToExit.add(src);
         }
 
         delayedEdges.remove(exitMarker);
       }
+    }
+
+    protected PreBasicBlock fixRealizedGoto(PreBasicBlock src, PreBasicBlock dst) {
+      int idx = src.instructions.size() - 1;
+      SSAInstruction lst = src.instructions.get(idx );
+      if (lst instanceof SSAGotoInstruction) {
+        src.instructions.set(idx, insts.GotoInstruction(lst.iIndex(), dst.getFirstInstructionIndex()));
+      } 
+      return dst; 
     }
 
     private void setUnwindState(CAstNode node, UnwindState context) {
@@ -1251,7 +1260,7 @@ public abstract class AstTranslator extends CAstVisitor<AstTranslator.WalkContex
       currentPosition = save;
     }
 
-    public void addInstruction(SSAInstruction n) {
+    public int addInstruction(SSAInstruction n) {
       deadBlocks.remove(currentBlock);
 
       int inst = currentInstruction++;
@@ -1277,7 +1286,7 @@ public abstract class AstTranslator extends CAstVisitor<AstTranslator.WalkContex
 
       currentBlock.instructions().add(n);
 
-      currentBlock.setLastIndex(inst);
+      return currentBlock.setLastIndex(inst);
     }
 
     @Override
@@ -3836,7 +3845,7 @@ public abstract class AstTranslator extends CAstVisitor<AstTranslator.WalkContex
         .addInstruction(
             insts.ConditionalBranchInstruction(
                 context.cfg().currentInstruction,
-                translateConditionOpcode(CAstOperator.OP_EQ),
+                translateConditionOpcode(CAstOperator.OP_NE),
                 null,
                 c.getValue(n.getChild(0)),
                 context.currentScope().getConstantValue(0),
@@ -3849,7 +3858,9 @@ public abstract class AstTranslator extends CAstVisitor<AstTranslator.WalkContex
     if (!context.cfg().isDeadBlock(context.cfg().getCurrentBlock())) {
       context.cfg().addInstruction(insts.GotoInstruction(context.cfg().currentInstruction, -1));
       PreBasicBlock bodyB = context.cfg().getCurrentBlock();
+      int idx = bodyB.instructions.size() - 1;
       context.cfg().addEdge(bodyB, headerB);
+      bodyB.instructions.set (idx, insts.GotoInstruction(context.cfg().currentInstruction, headerB.firstIndex));
 
       // next block
       context.cfg().newBlock(false);
