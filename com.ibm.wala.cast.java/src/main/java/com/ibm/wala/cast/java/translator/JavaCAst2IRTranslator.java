@@ -14,7 +14,6 @@
 package com.ibm.wala.cast.java.translator;
 
 import com.ibm.wala.cast.ir.translator.AstTranslator;
-import com.ibm.wala.cast.ir.translator.AstTranslator.WalkContext;
 import com.ibm.wala.cast.java.loader.JavaSourceLoaderImpl;
 import com.ibm.wala.cast.java.ssa.AstJavaInvokeInstruction;
 import com.ibm.wala.cast.java.ssa.AstJavaNewEnclosingInstruction;
@@ -371,10 +370,10 @@ public class JavaCAst2IRTranslator extends AstTranslator {
     }
   }
 
-  
   @Override
-  public void closeFunctionEntity(CAstEntity n, WalkContext parentContext, WalkContext functionContext) {
-    
+  public void closeFunctionEntity(
+      CAstEntity n, WalkContext parentContext, WalkContext functionContext) {
+
     // TODO Auto-generated method stub
     super.closeFunctionEntity(n, parentContext, functionContext);
   }

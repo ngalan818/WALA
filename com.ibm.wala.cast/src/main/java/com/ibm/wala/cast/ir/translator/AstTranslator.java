@@ -1136,11 +1136,12 @@ public abstract class AstTranslator extends CAstVisitor<AstTranslator.WalkContex
 
     protected PreBasicBlock fixRealizedGoto(PreBasicBlock src, PreBasicBlock dst) {
       int idx = src.instructions.size() - 1;
-      SSAInstruction lst = src.instructions.get(idx );
+      SSAInstruction lst = src.instructions.get(idx);
       if (lst instanceof SSAGotoInstruction) {
-        src.instructions.set(idx, insts.GotoInstruction(lst.iIndex(), dst.getFirstInstructionIndex()));
-      } 
-      return dst; 
+        src.instructions.set(
+            idx, insts.GotoInstruction(lst.iIndex(), dst.getFirstInstructionIndex()));
+      }
+      return dst;
     }
 
     private void setUnwindState(CAstNode node, UnwindState context) {
@@ -3860,7 +3861,8 @@ public abstract class AstTranslator extends CAstVisitor<AstTranslator.WalkContex
       PreBasicBlock bodyB = context.cfg().getCurrentBlock();
       int idx = bodyB.instructions.size() - 1;
       context.cfg().addEdge(bodyB, headerB);
-      bodyB.instructions.set (idx, insts.GotoInstruction(context.cfg().currentInstruction, headerB.firstIndex));
+      bodyB.instructions.set(
+          idx, insts.GotoInstruction(context.cfg().currentInstruction, headerB.firstIndex));
 
       // next block
       context.cfg().newBlock(false);
