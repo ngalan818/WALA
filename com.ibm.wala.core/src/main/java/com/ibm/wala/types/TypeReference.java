@@ -304,6 +304,11 @@ public final class TypeReference implements Serializable {
   public static final TypeReference JavaLangInteger =
       findOrCreate(ClassLoaderReference.Primordial, JavaLangIntegerName);
 
+  private static final TypeName JavaLangMathName = TypeName.string2TypeName("Ljava/lang/Math");
+
+  public static final TypeReference JavaLangMath =
+      findOrCreate(ClassLoaderReference.Primordial, JavaLangMathName);
+
   private static final TypeName JavaLangBooleanName =
       TypeName.string2TypeName("Ljava/lang/Boolean");
 

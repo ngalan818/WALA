@@ -81,6 +81,17 @@ public class IntegerUnionFind {
     }
   }
 
+  public int setSize(int elt) {
+    int sz = 0;
+    elt = findInternal(elt);
+    for (int i = 0; i < parent.length; i++) {
+      if (parent[i] == elt) {
+        sz++;
+      }
+    }
+    return sz;
+  }
+
   private void grow(int size) {
     parent = Arrays.copyOf(parent, size + 1);
   }

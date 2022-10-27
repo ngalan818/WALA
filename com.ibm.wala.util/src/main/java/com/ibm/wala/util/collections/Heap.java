@@ -46,11 +46,17 @@ public abstract class Heap<T> {
   }
 
   /** @return the first object in the priority queue */
-  public T take() throws NoSuchElementException {
+  public T peek() throws NoSuchElementException {
     if (numberOfElements == 0) {
       throw new NoSuchElementException();
     }
     T result = backingStore[0];
+    return result;
+  }
+
+  /** @return the first object in the priority queue */
+  public T take() throws NoSuchElementException {
+    T result = peek();
     removeElement(0);
     return result;
   }

@@ -73,6 +73,10 @@ public class Java2IRTranslator {
       }
     }
 
-    new JavaCAst2IRTranslator(module, ce, fLoader, exclusions).translate();
+    makeTranslator(module, ce).translate();
+  }
+
+  protected JavaCAst2IRTranslator makeTranslator(ModuleEntry module, CAstEntity ce) {
+    return new JavaCAst2IRTranslator(module, ce, fLoader, exclusions);
   }
 }

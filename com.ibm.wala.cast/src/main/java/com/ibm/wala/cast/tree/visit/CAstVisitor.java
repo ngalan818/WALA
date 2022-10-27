@@ -213,7 +213,7 @@ public abstract class CAstVisitor<C extends CAstVisitor.Context> {
           C codeContext = visitor.makeCodeContext(context, n);
           if (visitor.visitFunctionEntity(n, context, codeContext, visitor)) break;
           // visit the AST if any
-          if (n.getAST() != null) visitor.visit(n.getAST(), codeContext, visitor);
+          if (n.getAST() != null) visitor.visitAst(n, visitor, codeContext);
           // XXX: there may be code that needs to go in here
           // process any remaining scoped children
           visitor.visitScopedEntities(n, n.getScopedEntities(null), codeContext, visitor);
@@ -225,7 +225,7 @@ public abstract class CAstVisitor<C extends CAstVisitor.Context> {
           C codeContext = visitor.makeCodeContext(context, n);
           if (visitor.visitMacroEntity(n, context, codeContext, visitor)) break;
           // visit the AST if any
-          if (n.getAST() != null) visitor.visit(n.getAST(), codeContext, visitor);
+          if (n.getAST() != null) visitor.visitAst(n, visitor, codeContext);
           // XXX: there may be code that needs to go in here
           // process any remaining scoped children
           visitor.visitScopedEntities(n, n.getScopedEntities(null), codeContext, visitor);
@@ -237,7 +237,7 @@ public abstract class CAstVisitor<C extends CAstVisitor.Context> {
           C codeContext = visitor.makeCodeContext(context, n);
           if (visitor.visitScriptEntity(n, context, codeContext, visitor)) break;
           // visit the AST if any
-          if (n.getAST() != null) visitor.visit(n.getAST(), codeContext, visitor);
+          if (n.getAST() != null) visitor.visitAst(n, visitor, codeContext);
           // XXX: there may be code that needs to go in here
           // process any remaining scoped children
           visitor.visitScopedEntities(n, n.getScopedEntities(null), codeContext, visitor);
@@ -255,6 +255,10 @@ public abstract class CAstVisitor<C extends CAstVisitor.Context> {
     visitor.postProcessEntity(n, context, visitor);
 
     currentPosition = restore;
+  }
+
+  protected void visitAst(final CAstEntity n, CAstVisitor<C> visitor, C codeContext) {
+    visitor.visit(n.getAST(), codeContext, visitor);
   }
 
   /**
