@@ -77,6 +77,7 @@ import com.ibm.wala.util.intset.IntSet;
 import com.ibm.wala.util.intset.IntSetUtil;
 import com.ibm.wala.util.intset.IntegerUnionFind;
 import com.ibm.wala.util.intset.MutableIntSet;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -94,145 +95,6 @@ import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 public class ToSource {
-
-  static <T> Iterable<T> orderByInsts(
-      Set<T> chunks, Function<T, IntSet> defSet, Function<T, IntSet> useSet) {
-    return orderByInsts(chunks, defSet, useSet, (l, r) -> false);
-  }
-
-  static <T> Iterable<T> orderByInsts(
-      Set<T> chunks,
-      Function<T, IntSet> defSet,
-      Function<T, IntSet> useSet,
-      BiPredicate<T, T> cfg) {
-    if (chunks == null) {
-      return Collections.emptyList();
-    }
-    Graph<T> G =
-        new AbstractGraph<T>() {
-          private final NodeManager<T> nm =
-              new NodeManager<T>() {
-
-                @Override
-                public Stream<T> stream() {
-                  return chunks.stream();
-                }
-
-                @Override
-                public int getNumberOfNodes() {
-                  return chunks.size();
-                }
-
-                @Override
-                public void addNode(T n) {
-                  throw new UnsupportedOperationException();
-                }
-
-                @Override
-                public void removeNode(T n) throws UnsupportedOperationException {
-                  throw new UnsupportedOperationException();
-                }
-
-                @Override
-                public boolean containsNode(T n) {
-                  return chunks.contains(n);
-                }
-              };
-
-          @Override
-          protected NodeManager<T> getNodeManager() {
-            return nm;
-          }
-
-          private final EdgeManager<T> em =
-              new EdgeManager<T>() {
-
-                private final Map<T, Set<T>> forwardEdges = HashMapFactory.make();
-                private final Map<T, Set<T>> backwardEdges = HashMapFactory.make();
-
-                {
-                  for (T left : chunks) {
-                    for (T right : chunks) {
-                      if (cfg.test(left, right)
-                          || defSet.apply(left).containsAny(useSet.apply(right))) {
-                        if (!forwardEdges.containsKey(left)) {
-                          forwardEdges.put(left, HashSetFactory.make());
-                        }
-                        if (!backwardEdges.containsKey(right)) {
-                          backwardEdges.put(right, HashSetFactory.make());
-                        }
-                        forwardEdges.get(left).add(right);
-                        backwardEdges.get(right).add(left);
-                      }
-                    }
-                  }
-                }
-
-                @Override
-                public Iterator<T> getPredNodes(T n) {
-                  return backwardEdges.containsKey(n)
-                      ? backwardEdges.get(n).iterator()
-                      : EmptyIterator.instance();
-                }
-
-                @Override
-                public int getPredNodeCount(T n) {
-                  return backwardEdges.containsKey(n) ? backwardEdges.get(n).size() : 0;
-                }
-
-                @Override
-                public Iterator<T> getSuccNodes(T n) {
-                  return forwardEdges.containsKey(n)
-                      ? forwardEdges.get(n).iterator()
-                      : EmptyIterator.instance();
-                }
-
-                @Override
-                public int getSuccNodeCount(T N) {
-                  return forwardEdges.containsKey(N) ? forwardEdges.get(N).size() : 0;
-                }
-
-                @Override
-                public boolean hasEdge(T src, T dst) {
-                  return forwardEdges.containsKey(src)
-                      ? forwardEdges.get(src).contains(dst)
-                      : false;
-                }
-
-                @Override
-                public void addEdge(T src, T dst) {
-                  throw new UnsupportedOperationException();
-                }
-
-                @Override
-                public void removeEdge(T src, T dst) throws UnsupportedOperationException {
-                  throw new UnsupportedOperationException();
-                }
-
-                @Override
-                public void removeAllIncidentEdges(T node) throws UnsupportedOperationException {
-                  throw new UnsupportedOperationException();
-                }
-
-                @Override
-                public void removeIncomingEdges(T node) throws UnsupportedOperationException {
-                  throw new UnsupportedOperationException();
-                }
-
-                @Override
-                public void removeOutgoingEdges(T node) throws UnsupportedOperationException {
-                  throw new UnsupportedOperationException();
-                }
-              };
-
-          @Override
-          protected EdgeManager<T> getEdgeManager() {
-            return em;
-          }
-        };
-
-    return Topological.makeTopologicalIter(G);
-  }
 
   static MutableIntSet xSet(
       SSAInstruction inst,
@@ -519,6 +381,146 @@ public class ToSource {
   }
 
   protected static class RegionTreeNode {
+
+    <T> Iterable<T> orderByInsts(
+        Set<T> chunks, Function<T, IntSet> defSet, Function<T, IntSet> useSet) {
+      return orderByInsts(chunks, defSet, useSet, (l, r) -> false);
+    }
+
+    <T> Iterable<T> orderByInsts(
+        Set<T> chunks,
+        Function<T, IntSet> defSet,
+        Function<T, IntSet> useSet,
+        BiPredicate<T, T> cfg) {
+      if (chunks == null) {
+        return Collections.emptyList();
+      }
+      Graph<T> G =
+          new AbstractGraph<T>() {
+            private final NodeManager<T> nm =
+                new NodeManager<T>() {
+
+                  @Override
+                  public Stream<T> stream() {
+                    return chunks.stream();
+                  }
+
+                  @Override
+                  public int getNumberOfNodes() {
+                    return chunks.size();
+                  }
+
+                  @Override
+                  public void addNode(T n) {
+                    throw new UnsupportedOperationException();
+                  }
+
+                  @Override
+                  public void removeNode(T n) throws UnsupportedOperationException {
+                    throw new UnsupportedOperationException();
+                  }
+
+                  @Override
+                  public boolean containsNode(T n) {
+                    return chunks.contains(n);
+                  }
+                };
+
+            @Override
+            protected NodeManager<T> getNodeManager() {
+              return nm;
+            }
+
+            private final EdgeManager<T> em =
+                new EdgeManager<T>() {
+
+                  private final Map<T, Set<T>> forwardEdges = HashMapFactory.make();
+                  private final Map<T, Set<T>> backwardEdges = HashMapFactory.make();
+
+                  {
+                    for (T left : chunks) {
+                      for (T right : chunks) {
+                        if (cfg.test(left, right)
+                            || defSet.apply(left).containsAny(useSet.apply(right))) {
+                          if (!forwardEdges.containsKey(left)) {
+                            forwardEdges.put(left, HashSetFactory.make());
+                          }
+                          if (!backwardEdges.containsKey(right)) {
+                            backwardEdges.put(right, HashSetFactory.make());
+                          }
+                          forwardEdges.get(left).add(right);
+                          backwardEdges.get(right).add(left);
+                        }
+                      }
+                    }
+                  }
+
+                  @Override
+                  public Iterator<T> getPredNodes(T n) {
+                    return backwardEdges.containsKey(n)
+                        ? backwardEdges.get(n).iterator()
+                        : EmptyIterator.instance();
+                  }
+
+                  @Override
+                  public int getPredNodeCount(T n) {
+                    return backwardEdges.containsKey(n) ? backwardEdges.get(n).size() : 0;
+                  }
+
+                  @Override
+                  public Iterator<T> getSuccNodes(T n) {
+                    return forwardEdges.containsKey(n)
+                        ? forwardEdges.get(n).iterator()
+                        : EmptyIterator.instance();
+                  }
+
+                  @Override
+                  public int getSuccNodeCount(T N) {
+                    return forwardEdges.containsKey(N) ? forwardEdges.get(N).size() : 0;
+                  }
+
+                  @Override
+                  public boolean hasEdge(T src, T dst) {
+                    return forwardEdges.containsKey(src)
+                        ? forwardEdges.get(src).contains(dst)
+                        : false;
+                  }
+
+                  @Override
+                  public void addEdge(T src, T dst) {
+                    throw new UnsupportedOperationException();
+                  }
+
+                  @Override
+                  public void removeEdge(T src, T dst) throws UnsupportedOperationException {
+                    throw new UnsupportedOperationException();
+                  }
+
+                  @Override
+                  public void removeAllIncidentEdges(T node) throws UnsupportedOperationException {
+                    throw new UnsupportedOperationException();
+                  }
+
+                  @Override
+                  public void removeIncomingEdges(T node) throws UnsupportedOperationException {
+                    throw new UnsupportedOperationException();
+                  }
+
+                  @Override
+                  public void removeOutgoingEdges(T node) throws UnsupportedOperationException {
+                    throw new UnsupportedOperationException();
+                  }
+                };
+
+            @Override
+            protected EdgeManager<T> getEdgeManager() {
+              return em;
+            }
+          };
+
+      return Topological.makeTopologicalIter(G);
+    }
+
     private final IClassHierarchy cha;
     private final TypeInference types;
     private final Map<Set<Pair<SSAInstruction, ISSABasicBlock>>, Set<ISSABasicBlock>> regions;
@@ -747,11 +749,6 @@ public class ToSource {
                 }
               });
 
-      System.err.println(loopHeaders);
-      System.err.println(loopExits);
-
-      System.err.println(types);
-
       initChildren();
     }
 
@@ -796,9 +793,11 @@ public class ToSource {
       }
     }
 
+    /*
     private boolean phiChunk(Set<SSAInstruction> insts) {
       return insts.size() == 1 && insts.iterator().next() instanceof SSAPhiInstruction;
     }
+    */
 
     private boolean gotoChunk(Set<SSAInstruction> insts) {
       return insts.size() == 1 && insts.iterator().next() instanceof SSAGotoInstruction;
@@ -827,20 +826,7 @@ public class ToSource {
       CAst ast = new CAstImpl();
       List<CAstNode> elts = new LinkedList<>();
       Set<Set<SSAInstruction>> chunks = regionChunks.get(Pair.make(r, l));
-      Set<SSAInstruction> insts =
-          chunks.stream()
-              .reduce(
-                  (l, r) -> {
-                    Set<SSAInstruction> b = HashSetFactory.make(l);
-                    b.addAll(r);
-                    return b;
-                  })
-              .get();
-      orderByInsts(
-              chunks,
-              ToSource::defsSet,
-              ToSource::usesSet,
-              (x, y) -> controlOrderedChunks(x, y, insts))
+      orderChunks(chunks)
           .forEach(
               chunkInsts -> {
                 if (!gotoChunk(chunkInsts)) {
@@ -860,6 +846,16 @@ public class ToSource {
       return new ToCAst(c, new TypeInferenceContext(types));
     }
 
+    private static int chunkIndex(Set<SSAInstruction> chunk) {
+      return chunk.iterator().next().iIndex();
+    }
+
+    private static List<Set<SSAInstruction>> orderChunks(Set<Set<SSAInstruction>> chunks) {
+      Set<SSAInstruction>[] cs = chunks.toArray(new Set[chunks.size()]);
+      Arrays.sort(cs, (l, r) -> chunkIndex(l) - chunkIndex(r));
+      return Arrays.asList(cs);
+    }
+
     private void toString(StringBuffer text, int level) {
       Set<Set<SSAInstruction>> chunks = regionChunks.get(Pair.make(r, l));
       if (chunks == null) {
@@ -874,38 +870,10 @@ public class ToSource {
                     return b;
                   })
               .get();
-      chunks.stream()
-          .filter(this::phiChunk)
-          .forEach(
-              c -> {
-                indent(text, level + 1);
-                text.append(c).append("\n");
-              });
-      orderByInsts(
-              chunks,
-              si -> {
-                MutableIntSet x = defsSet(si);
-                for (SSAInstruction i : si) {
-                  if (children.containsKey(i)) {
-                    children
-                        .get(i)
-                        .keySet()
-                        .forEach(
-                            bb -> {
-                              bb.iteratePhis()
-                                  .forEachRemaining(
-                                      phi -> {
-                                        x.add(phi.getDef());
-                                      });
-                            });
-                  }
-                }
-                return x;
-              },
-              ToSource::usesSet)
+      orderChunks(chunks)
           .forEach(
               insts -> {
-                if (!phiChunk(insts) && !gotoChunk(insts)) {
+                if (!gotoChunk(insts)) {
                   Iterable<SSAInstruction> ii =
                       orderByInsts(
                           insts,
