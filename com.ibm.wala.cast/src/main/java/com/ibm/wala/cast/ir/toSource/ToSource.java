@@ -1352,12 +1352,14 @@ public class ToSource {
         }
 
         protected void visitAbstractInvoke(SSAAbstractInvokeInstruction inst) {
-          CAstNode[] args = new CAstNode[inst.getNumberOfUses() + 1];
+          CAstNode[] args = new CAstNode[inst.getNumberOfUses() + 2];
           for (int i = 0; i < inst.getNumberOfUses(); i++) {
-            args[i + 1] = visit(inst.getUse(i));
+            args[i + 2] = visit(inst.getUse(i));
           }
 
           args[0] = ast.makeConstant(inst.getDeclaredTarget());
+
+          args[1] = ast.makeConstant(inst.getCallSite().isStatic());
 
           node = ast.makeNode(CAstNode.CALL, args);
         }
@@ -1531,24 +1533,34 @@ public class ToSource {
     protected boolean visitCall(
         CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
       MethodReference target = (MethodReference) n.getChild(0).getValue();
+      boolean isStatic = ((Boolean) n.getChild(1).getValue()).booleanValue();
       if ("<init>".equals(target.getName().toString())) {
+        assert !isStatic;
         TypeName type = target.getDeclaringClass().getName();
         indent();
         System.err.print(type + " ");
-        visit(n.getChild(1), c, this);
+        visit(n.getChild(2), c, this);
         System.err.print(" = new " + type + "(");
+        for (int i = 3; i < n.getChildCount(); i++) {
+          if (i != 3) {
+            System.err.print(", ");
+          }
+          visit(n.getChild(i), c, visitor);
+        }
+        System.err.println(");");
+      } else if (isStatic) {
         for (int i = 2; i < n.getChildCount(); i++) {
           if (i != 2) {
             System.err.print(", ");
           }
           visit(n.getChild(i), c, visitor);
         }
-        System.err.println(");");
+        System.err.print(")");
       } else {
-        visit(n.getChild(1), c, this);
+        visit(n.getChild(2), c, this);
         System.err.print("." + target.getName() + "(");
-        for (int i = 2; i < n.getChildCount(); i++) {
-          if (i != 1) {
+        for (int i = 3; i < n.getChildCount(); i++) {
+          if (i != 3) {
             System.err.print(", ");
           }
           visit(n.getChild(i), c, visitor);
