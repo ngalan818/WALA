@@ -1247,23 +1247,28 @@ public class ToSource {
             RegionTreeNode fr = cc.get(notTaken);
             List<CAstNode> notTakenBlock = handleBlock(notTakenChunks, fr);
 
-            node =
-                takenBlock != null
-                    ? ast.makeNode(
-                        CAstNode.IF_STMT,
-                        test,
-                        ast.makeNode(
-                            CAstNode.BLOCK_STMT,
-                            notTakenBlock.toArray(new CAstNode[notTakenBlock.size()])),
-                        ast.makeNode(
-                            CAstNode.BLOCK_STMT,
-                            takenBlock.toArray(new CAstNode[takenBlock.size()])))
+            CAstNode notTakenStmt =
+                notTakenBlock.size() == 1
+                    ? notTakenBlock.iterator().next()
                     : ast.makeNode(
-                        CAstNode.IF_STMT,
-                        ast.makeNode(CAstNode.UNARY_EXPR, CAstOperator.OP_NOT, test),
-                        ast.makeNode(
-                            CAstNode.BLOCK_STMT,
-                            notTakenBlock.toArray(new CAstNode[notTakenBlock.size()])));
+                        CAstNode.BLOCK_STMT,
+                        notTakenBlock.toArray(new CAstNode[notTakenBlock.size()]));
+
+            if (takenBlock != null) {
+              CAstNode takenStmt =
+                  takenBlock.size() == 1
+                      ? takenBlock.iterator().next()
+                      : ast.makeNode(
+                          CAstNode.BLOCK_STMT, takenBlock.toArray(new CAstNode[takenBlock.size()]));
+
+              node = ast.makeNode(CAstNode.IF_STMT, test, notTakenStmt, takenStmt);
+            } else {
+              node =
+                  ast.makeNode(
+                      CAstNode.IF_STMT,
+                      ast.makeNode(CAstNode.UNARY_EXPR, CAstOperator.OP_NOT, test),
+                      notTakenStmt);
+            }
           }
         }
 
