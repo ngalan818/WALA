@@ -871,7 +871,7 @@ public class ClassHierarchy implements IClassHierarchy {
       throw new IllegalArgumentException("a is null");
     }
     /* BEGIN Custom change: remember unresolved classes */
-    final IClass cls = lookupClassRecursive(a);
+    final IClass cls = lookupClassRecursive(a, 0);
 
     if (cls == null) {
       unresolved.add(a);
@@ -880,7 +880,8 @@ public class ClassHierarchy implements IClassHierarchy {
     return cls;
   }
 
-  private IClass lookupClassRecursive(TypeReference a) {
+  private IClass lookupClassRecursive(TypeReference a, int level) {
+    assert level < 50;
     /* END Custom change: remember unresolved classes */
     ClassLoaderReference loader = a.getClassLoader();
 
@@ -888,7 +889,7 @@ public class ClassHierarchy implements IClassHierarchy {
     // first delegate lookup to the parent loader.
     if (parent != null) {
       TypeReference p = TypeReference.findOrCreate(parent, a.getName());
-      IClass c = lookupClassRecursive(p);
+      IClass c = lookupClassRecursive(p, level + 1);
       if (c != null) {
         return c;
       }
@@ -901,7 +902,7 @@ public class ClassHierarchy implements IClassHierarchy {
         // look it up with the primordial loader.
         return getRootClass().getClassLoader().lookupClass(a.getName());
       } else {
-        IClass c = lookupClassRecursive(elt);
+        IClass c = lookupClassRecursive(elt, level + 1);
         if (c == null) {
           // can't load the element class, so give up.
           return null;

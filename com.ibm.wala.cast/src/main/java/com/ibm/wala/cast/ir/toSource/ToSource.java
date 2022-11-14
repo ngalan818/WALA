@@ -958,8 +958,8 @@ public class ToSource {
           this.chunk = chunk;
           this.children = children;
           root.visit(this);
-          int def = root.getDef();
-          if (def != -1) {
+          if (root.hasDef()) {
+            int def = root.getDef();
             if (mergedValues.contains(mergePhis.find(def))) {
               CAstNode val = node;
               node =
@@ -1686,7 +1686,8 @@ public class ToSource {
   public void toJava(IR ir, IClassHierarchy cha, TypeInference types) {
     PrunedCFG<SSAInstruction, ISSABasicBlock> cfg =
         ExceptionPrunedCFG.makeUncaught(ir.getControlFlowGraph());
-
+    System.err.println(ir);
+    
     RegionTreeNode root = makeTreeNode(ir, cha, types, cfg);
 
     System.err.println("tree");
