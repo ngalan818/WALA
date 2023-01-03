@@ -45,6 +45,11 @@ public class JavaPrimitiveTypeMap {
     public Collection<CAstType> getSupertypes() {
       return Collections.emptyList();
     }
+
+    @Override
+    public String toString() {
+      return "CAstType: " + getLongName();
+    }
   }
 
   public static String getShortName(String longName) {

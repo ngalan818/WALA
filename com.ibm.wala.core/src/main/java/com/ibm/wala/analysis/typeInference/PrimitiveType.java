@@ -46,12 +46,16 @@ public abstract class PrimitiveType extends TypeAbstraction {
     } else if (rhs == this) {
       return this;
     } else if (rhs instanceof PrimitiveType) {
-      // the meet of two primitives is the smaller of the two types.
-      // in particular integer meet boolean == boolean
-      if (size() < ((PrimitiveType) rhs).size()) {
+      if (getTypeReference() == TypeReference.Double) {
         return this;
+      } else if (getTypeReference() == TypeReference.Float) {
+        return rhs.getTypeReference() == TypeReference.Double ? rhs : this;
       } else {
-        return rhs;
+        if (size() < ((PrimitiveType) rhs).size()) {
+          return rhs;
+        } else {
+          return this;
+        }
       }
     } else {
       return TOP;

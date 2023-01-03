@@ -227,12 +227,12 @@ public abstract class AstMethod implements IMethod {
 
   @Override
   public String getSignature() {
-    return ref.getSignature();
+    return getReference().getSignature();
   }
 
   @Override
   public Selector getSelector() {
-    return ref.getSelector();
+    return getReference().getSelector();
   }
 
   @Override
@@ -247,12 +247,12 @@ public abstract class AstMethod implements IMethod {
 
   @Override
   public Atom getName() {
-    return ref.getName();
+    return getReference().getName();
   }
 
   @Override
   public Descriptor getDescriptor() {
-    return ref.getDescriptor();
+    return getReference().getDescriptor();
   }
 
   @Override
@@ -262,7 +262,7 @@ public abstract class AstMethod implements IMethod {
 
   @Override
   public TypeReference getReturnType() {
-    return ref.getReturnType();
+    return getReference().getReturnType();
   }
 
   @Override

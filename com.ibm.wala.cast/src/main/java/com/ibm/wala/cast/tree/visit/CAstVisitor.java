@@ -566,6 +566,14 @@ public abstract class CAstVisitor<C extends CAstVisitor.Context> {
           break;
         }
 
+      case CAstNode.EXPR_STMT:
+        {
+          if (visitor.visitExprStmt(n, context, visitor)) break;
+          visitor.visit(n.getChild(0), context, visitor);
+          visitor.leaveExprStmt(n, context, visitor);
+          break;
+        }
+
       case CAstNode.BLOCK_STMT:
         {
           if (visitor.visitBlockStmt(n, context, visitor)) break;
@@ -1241,12 +1249,31 @@ public abstract class CAstVisitor<C extends CAstVisitor.Context> {
     return visitor.visitNode(n, c, visitor);
   }
   /**
+   * Visit a BlockExpr node.
+   *
+   * @param n the node to process
+   * @param c a visitor-specific context
+   * @return true if no further processing is needed
+   */
+  protected boolean visitExprStmt(CAstNode n, C c, CAstVisitor<C> visitor) {
+    return visitor.visitNode(n, c, visitor);
+  }
+  /**
    * Leave a BlockExpr node.
    *
    * @param n the node to process
    * @param c a visitor-specific context
    */
   protected void leaveBlockExpr(CAstNode n, C c, CAstVisitor<C> visitor) {
+    visitor.leaveNode(n, c, visitor);
+  }
+  /**
+   * Leave a BlockExpr node.
+   *
+   * @param n the node to process
+   * @param c a visitor-specific context
+   */
+  protected void leaveExprStmt(CAstNode n, C c, CAstVisitor<C> visitor) {
     visitor.leaveNode(n, c, visitor);
   }
   /**

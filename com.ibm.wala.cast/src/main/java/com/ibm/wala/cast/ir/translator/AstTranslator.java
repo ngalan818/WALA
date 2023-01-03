@@ -3818,6 +3818,11 @@ public abstract class AstTranslator extends CAstVisitor<AstTranslator.WalkContex
   }
 
   @Override
+  protected void leaveExprStmt(CAstNode n, WalkContext c, CAstVisitor<WalkContext> visitor) {
+    c.setValue(n, c.getValue(n.getChild(0)));
+  }
+
+  @Override
   protected boolean visitBlockStmt(CAstNode n, WalkContext c, CAstVisitor<WalkContext> visitor) {
     /* empty */
     return false;

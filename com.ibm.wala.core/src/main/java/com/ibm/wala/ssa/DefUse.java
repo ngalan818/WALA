@@ -33,6 +33,13 @@ public class DefUse {
    */
   private final MutableIntSet[] uses;
 
+  /**
+   * A mapping from integer (value number) -&gt; to how many uses the value number has. Note that
+   * this may not be simply a count of uses, because the same instruction can use a single value
+   * number multiple times.
+   */
+  private final int[] useCounts;
+
   /** A Mapping from integer -&gt; Instruction */
   protected final ArrayList<SSAInstruction> allInstructions = new ArrayList<>();
 
@@ -53,6 +60,7 @@ public class DefUse {
     initAllInstructions();
     defs = new SSAInstruction[getMaxValueNumber() + 1];
     uses = new MutableIntSet[getMaxValueNumber() + 1];
+    useCounts = new int[getMaxValueNumber() + 1];
     if (DEBUG) {
       System.err.println(("DefUse: defs.length " + defs.length));
     }
@@ -73,6 +81,7 @@ public class DefUse {
               uses[use] = IntSetUtil.make();
             }
             uses[use].add(i);
+            useCounts[use]++;
           }
         } catch (ArrayIndexOutOfBoundsException e) {
           assert false : "unexpected value number " + use;
@@ -125,6 +134,11 @@ public class DefUse {
     } else {
       return new UseIterator(uses[v]);
     }
+  }
+
+  /** Return all uses of the variable with the given value number */
+  public int getUseCount(int v) {
+    return useCounts[v];
   }
 
   /** return an {@link Iterator} of all instructions that use any of a set of variables */

@@ -1,9 +1,18 @@
 package com.ibm.wala.cast.ir.toSource;
 
+import static com.ibm.wala.types.TypeReference.Boolean;
+import static com.ibm.wala.types.TypeReference.Char;
+import static com.ibm.wala.types.TypeReference.Double;
+import static com.ibm.wala.types.TypeReference.Float;
+import static com.ibm.wala.types.TypeReference.Int;
+import static com.ibm.wala.types.TypeReference.Long;
+import static com.ibm.wala.types.TypeReference.Void;
+
 import com.ibm.wala.analysis.typeInference.TypeInference;
 import com.ibm.wala.cast.ir.ssa.AssignInstruction;
 import com.ibm.wala.cast.ir.ssa.AstPreInstructionVisitor;
 import com.ibm.wala.cast.ir.ssa.CAstBinaryOp;
+import com.ibm.wala.cast.ir.ssa.analysis.LiveAnalysis;
 import com.ibm.wala.cast.tree.CAst;
 import com.ibm.wala.cast.tree.CAstAnnotation;
 import com.ibm.wala.cast.tree.CAstControlFlowMap;
@@ -19,6 +28,7 @@ import com.ibm.wala.cast.tree.impl.CAstOperator;
 import com.ibm.wala.cast.tree.visit.CAstVisitor;
 import com.ibm.wala.cfg.Util;
 import com.ibm.wala.cfg.cdg.ControlDependenceGraph;
+import com.ibm.wala.core.util.strings.Atom;
 import com.ibm.wala.ipa.cfg.ExceptionPrunedCFG;
 import com.ibm.wala.ipa.cfg.PrunedCFG;
 import com.ibm.wala.ipa.cha.IClassHierarchy;
@@ -57,13 +67,11 @@ import com.ibm.wala.ssa.SSAUnaryOpInstruction;
 import com.ibm.wala.ssa.SymbolTable;
 import com.ibm.wala.types.FieldReference;
 import com.ibm.wala.types.MethodReference;
-import com.ibm.wala.types.TypeName;
 import com.ibm.wala.types.TypeReference;
 import com.ibm.wala.util.collections.EmptyIterator;
 import com.ibm.wala.util.collections.HashMapFactory;
 import com.ibm.wala.util.collections.HashSetFactory;
 import com.ibm.wala.util.collections.Heap;
-import com.ibm.wala.util.collections.IteratorUtil;
 import com.ibm.wala.util.collections.NonNullSingletonIterator;
 import com.ibm.wala.util.collections.Pair;
 import com.ibm.wala.util.collections.ReverseIterator;
@@ -73,10 +81,12 @@ import com.ibm.wala.util.graph.Graph;
 import com.ibm.wala.util.graph.NodeManager;
 import com.ibm.wala.util.graph.traverse.DFS;
 import com.ibm.wala.util.graph.traverse.Topological;
+import com.ibm.wala.util.intset.BitVector;
 import com.ibm.wala.util.intset.IntSet;
 import com.ibm.wala.util.intset.IntSetUtil;
 import com.ibm.wala.util.intset.IntegerUnionFind;
 import com.ibm.wala.util.intset.MutableIntSet;
+import java.io.PrintWriter;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -187,17 +197,22 @@ public class ToSource {
     }
 
     void gatherInstructions(
-        Set<SSAInstruction> stuff, IR ir, DefUse du, Set<SSAInstruction> regionInsts, int vn) {
+        Set<SSAInstruction> stuff,
+        IR ir,
+        DefUse du,
+        Set<SSAInstruction> regionInsts,
+        int vn,
+        Heap<Set<SSAInstruction>> chunks) {
       if (ir.getSymbolTable().isConstant(vn)) {
         return;
       } else if (vn <= ir.getSymbolTable().getNumberOfParameters()) {
         return;
-      } else if (IteratorUtil.count(du.getUses(vn)) != 1) {
+      } else if (du.getUseCount(vn) != 1) {
         return;
       } else {
         SSAInstruction inst = du.getDef(vn);
         assert inst != null;
-        gatherInstructions(stuff, ir, du, regionInsts, inst);
+        gatherInstructions(stuff, ir, du, regionInsts, inst, chunks);
       }
     }
 
@@ -206,7 +221,8 @@ public class ToSource {
         IR ir,
         DefUse du,
         Set<SSAInstruction> regionInsts,
-        SSAInstruction inst) {
+        SSAInstruction inst,
+        Heap<Set<SSAInstruction>> chunks) {
       if (!stuff.contains(inst) && regionInsts.contains(inst)) {
         if (!deemedFunctional(inst, regionInsts, cha)) {
           if (functionalOnly) {
@@ -216,8 +232,9 @@ public class ToSource {
           }
         }
         stuff.add(inst);
+        chunks.insert(HashSetFactory.make(stuff));
         for (int i = 0; i < inst.getNumberOfUses(); i++) {
-          gatherInstructions(stuff, ir, du, regionInsts, inst.getUse(i));
+          gatherInstructions(stuff, ir, du, regionInsts, inst.getUse(i), chunks);
         }
       }
     }
@@ -524,10 +541,10 @@ public class ToSource {
     private final IClassHierarchy cha;
     private final TypeInference types;
     private final Map<Set<Pair<SSAInstruction, ISSABasicBlock>>, Set<ISSABasicBlock>> regions;
+    private final Map<Pair<SSAInstruction, ISSABasicBlock>, Set<SSAInstruction>> linePhis;
     private final Map<Pair<SSAInstruction, ISSABasicBlock>, Set<Set<SSAInstruction>>> regionChunks;
     private final MutableIntSet mergedValues;
     private final IntegerUnionFind mergePhis;
-    private final Map<SSAInstruction, Set<SSAPhiInstruction>> condPhis;
     private final SymbolTable ST;
     private final DefUse du;
     private final PrunedCFG<SSAInstruction, ISSABasicBlock> cfg;
@@ -535,6 +552,7 @@ public class ToSource {
     private final Set<ISSABasicBlock> loopExits;
     private final SSAInstruction r;
     private final ISSABasicBlock l;
+    private Map<Integer, MutableIntSet> livenessConflicts;
     protected final Map<SSAInstruction, Map<ISSABasicBlock, RegionTreeNode>> children =
         HashMapFactory.make();
 
@@ -544,15 +562,16 @@ public class ToSource {
       this.cha = parent.cha;
       this.types = parent.types;
       this.regions = parent.regions;
+      this.linePhis = parent.linePhis;
       this.regionChunks = parent.regionChunks;
       this.mergedValues = parent.mergedValues;
       this.mergePhis = parent.mergePhis;
-      this.condPhis = parent.condPhis;
       this.ST = parent.ST;
       this.du = parent.du;
       this.cfg = parent.cfg;
       this.loopHeaders = parent.loopHeaders;
       this.loopExits = parent.loopExits;
+      this.livenessConflicts = parent.livenessConflicts;
       initChildren();
     }
 
@@ -564,6 +583,29 @@ public class ToSource {
       this.types = types;
       du = new DefUse(ir);
       cfg = ExceptionPrunedCFG.makeUncaught(ir.getControlFlowGraph());
+      livenessConflicts = HashMapFactory.make();
+      LiveAnalysis.Result liveness = LiveAnalysis.perform(ir);
+      System.err.println("liveness");
+      System.err.println(liveness);
+      for (SSAInstruction inst : ir.getInstructions()) {
+        if (inst != null) {
+          BitVector live = liveness.getLiveBefore(inst.iIndex());
+          int lv = 0;
+          while ((lv = live.nextSetBit(lv + 1)) > 0) {
+            int rv = lv + 1;
+            while ((rv = live.nextSetBit(rv + 1)) > 0) {
+              if (!livenessConflicts.containsKey(lv)) {
+                livenessConflicts.put(lv, IntSetUtil.make());
+              }
+              livenessConflicts.get(lv).add(rv);
+              if (!livenessConflicts.containsKey(rv)) {
+                livenessConflicts.put(rv, IntSetUtil.make());
+              }
+              livenessConflicts.get(rv).add(lv);
+            }
+          }
+        }
+      }
       ControlDependenceGraph<ISSABasicBlock> cdg = new ControlDependenceGraph<>(cfg, true);
       System.err.println(cdg);
       IRToCAst.toCAst(ir)
@@ -609,39 +651,45 @@ public class ToSource {
 
       ST = ir.getSymbolTable();
       mergedValues = IntSetUtil.make();
-      condPhis = HashMapFactory.make();
       mergePhis = new IntegerUnionFind(ST.getMaxValueNumber());
-      ir.getControlFlowGraph()
-          .iterator()
-          .forEachRemaining(
-              bb -> {
-                bb.iteratePhis()
-                    .forEachRemaining(
-                        phi -> {
-                          for (int i = 0; i < phi.getNumberOfUses(); i++) {
-                            if (!ST.isConstant(phi.getUse(i))
-                                && !(du.getDef(phi.getUse(i)) instanceof SSAPhiInstruction)) {
-                              mergePhis.union(phi.getUse(i), phi.getDef());
-                              mergedValues.add(phi.getUse(i));
-                              mergedValues.add(phi.getDef());
-                            }
-                          }
-                        });
-                if (!bb.isEntryBlock()
-                    && !bb.isExitBlock()
-                    && bb.getLastInstruction() instanceof SSAConditionalBranchInstruction) {
-                  if (!condPhis.containsKey(bb.getLastInstruction())) {
-                    condPhis.put(bb.getLastInstruction(), HashSetFactory.make());
-                  }
-                  bb.iteratePhis()
-                      .forEachRemaining(
-                          phi -> {
-                            condPhis.get(bb.getLastInstruction()).add(phi);
-                          });
-                }
-              });
+      /*
+            ir.getControlFlowGraph()
+                .iterator()
+                .forEachRemaining(
+                    bb -> {
+                      bb.iteratePhis()
+                          .forEachRemaining(
+                              phi -> {
+                                int def = phi.getDef();
+                                for (int i = 0; i < phi.getNumberOfUses(); i++) {
+                                  int use = phi.getUse(i);
+                                  int min = Math.min(def, use);
+                                  int max = Math.max(def, use);
+                                  if (!ST.isConstant(use)
+                                      && (!livenessConflicts.containsKey(min)
+                                          || !livenessConflicts.get(min).contains(max))
+                                      && (!livenessConflicts.containsKey(max)
+                                          || !livenessConflicts.get(max).contains(min))) {
+                                    if (!livenessConflicts.containsKey(max)) {
+                                      livenessConflicts.put(max, IntSetUtil.make());
+                                    }
+                                    if (!livenessConflicts.containsKey(min)) {
+                                      livenessConflicts.put(min, IntSetUtil.make());
+                                    }
 
+                                    livenessConflicts.get(max).addAll(livenessConflicts.get(min));
+                                    livenessConflicts.get(min).addAll(livenessConflicts.get(max));
+
+                                    mergePhis.union(min, max);
+                                    mergedValues.add(use);
+                                    mergedValues.add(def);
+                                  }
+                                }
+                              });
+                    });
+      */
       regions = HashMapFactory.make();
+      linePhis = HashMapFactory.make();
       cdg.forEach(
           node -> {
             Set<Pair<SSAInstruction, ISSABasicBlock>> regionKey = HashSetFactory.make();
@@ -697,7 +745,32 @@ public class ToSource {
                                               int lv = phi.getDef();
                                               int rv = phi.getUse(Util.whichPred(cfg, bb, sb));
                                               if (mergePhis.find(lv) != mergePhis.find(rv)) {
-                                                regionInsts.add(new AssignInstruction(-1, lv, rv));
+                                                AssignInstruction assign =
+                                                    new AssignInstruction(
+                                                        bb.getLastInstructionIndex() + 1, lv, rv);
+
+                                                if (Util.endsWithConditionalBranch(cfg, bb)
+                                                    && (Util.getTakenSuccessor(cfg, bb).equals(sb)
+                                                        || Util.getNotTakenSuccessor(cfg, bb)
+                                                            .equals(bb))) {
+                                                  System.err.println(
+                                                      "found line phi for "
+                                                          + bb
+                                                          + " to "
+                                                          + sb
+                                                          + " for "
+                                                          + rv
+                                                          + " -> "
+                                                          + lv);
+                                                  Pair<SSAInstruction, ISSABasicBlock> lineKey =
+                                                      Pair.make(bb.getLastInstruction(), sb);
+                                                  if (!linePhis.containsKey(lineKey)) {
+                                                    linePhis.put(lineKey, HashSetFactory.make());
+                                                  }
+                                                  linePhis.get(lineKey).add(assign);
+                                                } else {
+                                                  regionInsts.add(assign);
+                                                }
                                               }
                                             });
                                   });
@@ -714,9 +787,9 @@ public class ToSource {
                 regionInsts.forEach(
                     inst -> {
                       Set<SSAInstruction> insts = HashSetFactory.make();
-                      (new TreeBuilder(cha)).gatherInstructions(insts, ir, du, regionInsts, inst);
+                      (new TreeBuilder(cha))
+                          .gatherInstructions(insts, ir, du, regionInsts, inst, chunks);
                       System.err.println("chunk for " + inst + ": " + insts);
-                      chunks.insert(insts);
                     });
                 while (chunks.size() > 0 && !regionInsts.isEmpty()) {
                   Set<SSAInstruction> chunk = chunks.take();
@@ -847,6 +920,13 @@ public class ToSource {
     }
 
     private static int chunkIndex(Set<SSAInstruction> chunk) {
+      Iterator<SSAInstruction> insts = chunk.iterator();
+      while (insts.hasNext()) {
+        SSAInstruction inst = insts.next();
+        if (!(inst instanceof AssignInstruction)) {
+          return inst.iIndex();
+        }
+      }
       return chunk.iterator().next().iIndex();
     }
 
@@ -916,30 +996,6 @@ public class ToSource {
       return sb.toString();
     }
 
-    private MutableIntSet deepXSet(
-        Set<SSAInstruction> insts, Function<Set<SSAInstruction>, MutableIntSet> f) {
-      MutableIntSet x = f.apply(insts);
-      insts.forEach(
-          inst -> {
-            if (children.containsKey(inst)) {
-              children
-                  .get(inst)
-                  .entrySet()
-                  .forEach(
-                      es -> {
-                        Set<Set<SSAInstruction>> childChunks =
-                            regionChunks.get(Pair.make(inst, es.getKey()));
-                        RegionTreeNode lr = es.getValue();
-                        childChunks.forEach(
-                            childChunk -> {
-                              x.addAll(lr.deepXSet(childChunk, f));
-                            });
-                      });
-            }
-          });
-      return x;
-    }
-
     protected class ToCAst {
       private final CAst ast = new CAstImpl();
       private final Set<SSAInstruction> chunk;
@@ -960,11 +1016,12 @@ public class ToSource {
           root.visit(this);
           if (root.hasDef()) {
             int def = root.getDef();
-            if (mergedValues.contains(mergePhis.find(def))) {
+            if (mergedValues.contains(mergePhis.find(def))
+                || du.getDef(def) instanceof SSAPhiInstruction) {
               CAstNode val = node;
               node =
                   ast.makeNode(
-                      CAstNode.BLOCK_EXPR,
+                      CAstNode.EXPR_STMT,
                       ast.makeNode(
                           CAstNode.ASSIGN,
                           ast.makeNode(
@@ -976,7 +1033,7 @@ public class ToSource {
                   ast.makeNode(
                       CAstNode.DECL_STMT,
                       ast.makeNode(CAstNode.VAR, ast.makeConstant("var_" + mergePhis.find(def))),
-                      ast.makeConstant(c.getTypes().getType(def)),
+                      ast.makeConstant(toSource(c.getTypes().getType(def).getTypeReference())),
                       val);
             }
           }
@@ -986,7 +1043,15 @@ public class ToSource {
           if (ST.isConstant(vn)) {
             return ast.makeConstant(ST.getConstantValue(vn));
           } else if (ST.getNumberOfParameters() >= vn) {
-            return ast.makeNode(CAstNode.VAR, ast.makeConstant("argument#" + vn));
+            if (cfg.getMethod().isStatic()) {
+              return ast.makeNode(CAstNode.VAR, ast.makeConstant("var_" + vn));
+            } else {
+              if (vn == 1) {
+                return ast.makeNode(CAstNode.THIS);
+              } else {
+                return ast.makeNode(CAstNode.VAR, ast.makeConstant("var_" + (vn - 1)));
+              }
+            }
           } else {
             SSAInstruction inst = du.getDef(vn);
             if (chunk.contains(inst)) {
@@ -1014,7 +1079,8 @@ public class ToSource {
         public void visitArrayLoad(SSAArrayLoadInstruction instruction) {
           CAstNode array = visit(instruction.getArrayRef());
           CAstNode index = visit(instruction.getIndex());
-          node = ast.makeNode(CAstNode.ARRAY_REF, array, index);
+          CAstNode elt = ast.makeConstant(toSource(instruction.getElementType()));
+          node = ast.makeNode(CAstNode.ARRAY_REF, array, elt, index);
         }
 
         @Override
@@ -1022,11 +1088,12 @@ public class ToSource {
           CAstNode array = visit(instruction.getArrayRef());
           CAstNode index = visit(instruction.getIndex());
           CAstNode value = visit(instruction.getValue());
+          CAstNode elt = ast.makeConstant(toSource(instruction.getElementType()));
           node =
               ast.makeNode(
-                  CAstNode.BLOCK_EXPR,
+                  CAstNode.EXPR_STMT,
                   ast.makeNode(
-                      CAstNode.ASSIGN, ast.makeNode(CAstNode.ARRAY_REF, array, index), value));
+                      CAstNode.ASSIGN, ast.makeNode(CAstNode.ARRAY_REF, array, elt, index), value));
         }
 
         @Override
@@ -1124,7 +1191,7 @@ public class ToSource {
           CAstNode value = visit(instruction.getUse(0));
           node =
               ast.makeNode(
-                  CAstNode.CAST, ast.makeConstant(instruction.getToType().toString()), value);
+                  CAstNode.CAST, ast.makeConstant(toSource(instruction.getToType())), value);
         }
 
         @Override
@@ -1148,6 +1215,37 @@ public class ToSource {
           }
 
           node = ast.makeNode(CAstNode.BINARY_EXPR, op, left, right);
+        }
+
+        private CAstNode checkLinePhi(
+            CAstNode block, SSAInstruction branch, ISSABasicBlock target) {
+          Pair<SSAInstruction, ISSABasicBlock> key = Pair.make(branch, target);
+          System.err.println(
+              "checking for line phi for instruction "
+                  + branch
+                  + " and target "
+                  + target
+                  + "in "
+                  + linePhis);
+          if (linePhis.containsKey(key)) {
+            List<CAstNode> lp = new LinkedList<>();
+            for (SSAInstruction inst : linePhis.get(key)) {
+              assert inst instanceof AssignInstruction;
+              Visitor v =
+                  makeToCAst(linePhis.get(key)).makeVisitor(inst, c, Collections.singleton(inst));
+              lp.add(
+                  ast.makeNode(
+                      CAstNode.EXPR_STMT,
+                      ast.makeNode(
+                          CAstNode.ASSIGN, v.visit(inst.getDef()), v.visit(inst.getUse(0)))));
+            }
+            if (block != null) {
+              lp.add(block);
+            }
+            return ast.makeNode(CAstNode.BLOCK_STMT, lp.toArray(new CAstNode[lp.size()]));
+          } else {
+            return block;
+          }
         }
 
         @Override
@@ -1181,12 +1279,22 @@ public class ToSource {
                 break;
             }
           }
-          CAstNode test =
-              ast.makeNode(
-                  CAstNode.BINARY_EXPR,
-                  castOp,
-                  visit(instruction.getUse(0)),
-                  visit(instruction.getUse(1)));
+          CAstNode test;
+          test:
+          {
+            CAstNode v1 = visit(instruction.getUse(0));
+            CAstNode v2 = visit(instruction.getUse(1));
+            if (v2.getValue() instanceof Number && ((Number) v2.getValue()).equals(0)) {
+              if (castOp == CAstOperator.OP_NE) {
+                test = v1;
+                break test;
+              } else if (castOp == CAstOperator.OP_EQ) {
+                test = ast.makeNode(CAstNode.UNARY_EXPR, CAstOperator.OP_NOT, v1);
+                break test;
+              }
+            }
+            test = ast.makeNode(CAstNode.BINARY_EXPR, castOp, v1, v2);
+          }
 
           Map<ISSABasicBlock, RegionTreeNode> cc = children.get(instruction);
           ISSABasicBlock ibb = cfg.getBlockForInstruction(instruction.iIndex());
@@ -1242,8 +1350,9 @@ public class ToSource {
             }
             assert notTaken != null;
 
-            Set<Set<SSAInstruction>> notTakenChunks =
-                regionChunks.get(Pair.make(instruction, notTaken));
+            Pair<SSAConditionalBranchInstruction, ISSABasicBlock> notTakenKey =
+                Pair.make(instruction, notTaken);
+            Set<Set<SSAInstruction>> notTakenChunks = regionChunks.get(notTakenKey);
             RegionTreeNode fr = cc.get(notTaken);
             List<CAstNode> notTakenBlock = handleBlock(notTakenChunks, fr);
 
@@ -1254,14 +1363,20 @@ public class ToSource {
                         CAstNode.BLOCK_STMT,
                         notTakenBlock.toArray(new CAstNode[notTakenBlock.size()]));
 
+            notTakenStmt = checkLinePhi(notTakenStmt, instruction, notTaken);
+
+            CAstNode takenStmt = null;
             if (takenBlock != null) {
-              CAstNode takenStmt =
+              takenStmt =
                   takenBlock.size() == 1
                       ? takenBlock.iterator().next()
                       : ast.makeNode(
                           CAstNode.BLOCK_STMT, takenBlock.toArray(new CAstNode[takenBlock.size()]));
+            }
+            takenStmt = checkLinePhi(takenStmt, instruction, taken);
 
-              node = ast.makeNode(CAstNode.IF_STMT, test, notTakenStmt, takenStmt);
+            if (takenStmt != null) {
+              node = ast.makeNode(CAstNode.IF_STMT, test, takenStmt, notTakenStmt);
             } else {
               node =
                   ast.makeNode(
@@ -1274,26 +1389,13 @@ public class ToSource {
 
         private List<CAstNode> handleBlock(Set<Set<SSAInstruction>> loopChunks, RegionTreeNode lr) {
           List<CAstNode> block =
-              StreamSupport.stream(
-                      orderByInsts(
-                              loopChunks,
-                              insts ->
-                                  deepXSet(
-                                      insts,
-                                      si -> {
-                                        MutableIntSet x = defsSet(si);
-                                        for (SSAInstruction i : si) {
-                                          if (condPhis.containsKey(i)) {
-                                            for (SSAPhiInstruction p : condPhis.get(i)) {
-                                              x.add(p.getDef());
-                                            }
-                                          }
-                                        }
-                                        return x;
-                                      }),
-                              insts -> deepXSet(insts, ToSource::usesSet))
-                          .spliterator(),
-                      false)
+              StreamSupport.stream(orderChunks(loopChunks).spliterator(), false)
+                  .sorted(
+                      (x, y) -> {
+                        boolean gx = x.iterator().next() instanceof SSAGotoInstruction;
+                        boolean gy = y.iterator().next() instanceof SSAGotoInstruction;
+                        return (gx ? 1 : -1) + (gy ? -1 : 1);
+                      })
                   .map(c -> lr.makeToCAst(c).processChunk())
                   .collect(Collectors.toList());
           return block;
@@ -1314,19 +1416,18 @@ public class ToSource {
 
         @Override
         public void visitGet(SSAGetInstruction instruction) {
-          if (instruction.isStatic()) {
-            node =
-                ast.makeNode(
-                    CAstNode.OBJECT_REF,
-                    ast.makeConstant(null),
-                    ast.makeConstant(instruction.getDeclaredField()));
-          } else {
-            node =
-                ast.makeNode(
-                    CAstNode.OBJECT_REF,
-                    visit(instruction.getRef()),
-                    ast.makeConstant(instruction.getDeclaredField()));
-          }
+          node =
+              ast.makeNode(
+                  CAstNode.OBJECT_REF,
+                  instruction.isStatic()
+                      ? ast.makeConstant(
+                          instruction
+                              .getDeclaredField()
+                              .getDeclaringClass()
+                              .getName()
+                              .getClassName())
+                      : visit(instruction.getRef()),
+                  ast.makeConstant(instruction.getDeclaredField()));
         }
 
         @Override
@@ -1334,7 +1435,7 @@ public class ToSource {
           if (instruction.isStatic()) {
             node =
                 ast.makeNode(
-                    CAstNode.BLOCK_EXPR,
+                    CAstNode.EXPR_STMT,
                     ast.makeNode(
                         CAstNode.ASSIGN,
                         ast.makeNode(
@@ -1345,7 +1446,7 @@ public class ToSource {
           } else {
             node =
                 ast.makeNode(
-                    CAstNode.BLOCK_EXPR,
+                    CAstNode.EXPR_STMT,
                     ast.makeNode(
                         CAstNode.ASSIGN,
                         ast.makeNode(
@@ -1366,7 +1467,11 @@ public class ToSource {
 
           args[1] = ast.makeConstant(inst.getCallSite().isStatic());
 
-          node = ast.makeNode(CAstNode.CALL, args);
+          if (Void.equals(inst.getDeclaredResultType())) {
+            node = ast.makeNode(CAstNode.EXPR_STMT, ast.makeNode(CAstNode.CALL, args));
+          } else {
+            node = ast.makeNode(CAstNode.CALL, args);
+          }
         }
 
         @Override
@@ -1376,7 +1481,13 @@ public class ToSource {
 
         @Override
         public void visitNew(SSANewInstruction instruction) {
-          node = ast.makeNode(CAstNode.NEW, ast.makeConstant(instruction.getConcreteType()));
+          if (instruction.getConcreteType().isArrayType()) {
+            node =
+                ast.makeNode(
+                    CAstNode.NEW,
+                    ast.makeConstant(instruction.getConcreteType()),
+                    visit(instruction.getUse(0)));
+          }
         }
 
         @Override
@@ -1403,7 +1514,7 @@ public class ToSource {
           node =
               ast.makeNode(
                   CAstNode.CAST,
-                  ast.makeConstant(instruction.getDeclaredResultTypes()[0]),
+                  ast.makeConstant(toSource(instruction.getDeclaredResultTypes()[0])),
                   visit(instruction.getVal()));
         }
 
@@ -1465,14 +1576,16 @@ public class ToSource {
 
   static class ToJavaVisitor extends CAstVisitor<TypeInferenceContext> {
     private final int indent;
+    private final PrintWriter out;
 
-    private ToJavaVisitor(int indent) {
+    private ToJavaVisitor(int indent, PrintWriter out) {
+      this.out = out;
       this.indent = indent;
     }
 
     private void indent() {
       for (int i = 0; i < indent; i++) {
-        System.err.print("  ");
+        out.print("  ");
       }
     }
 
@@ -1480,13 +1593,13 @@ public class ToSource {
     protected boolean visitDeclStmt(
         CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
       indent();
-      System.err.print(n.getChild(1).getValue() + " ");
+      out.print(((CAstType) n.getChild(1).getValue()).getName() + " ");
       visit(n.getChild(0), c, visitor);
-      if (n.getChildCount() > 2) {
-        System.err.print(" = ");
+      if (n.getChildCount() > 2 && n.getChild(2).getKind() != CAstNode.EMPTY) {
+        out.print(" = ");
         visit(n.getChild(2), c, visitor);
       }
-      System.err.println(";");
+      out.println(";");
       return true;
     }
 
@@ -1494,13 +1607,15 @@ public class ToSource {
     protected boolean visitBlockStmt(
         CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
       indent();
-      System.err.println("{");
-      ToJavaVisitor cv = new ToJavaVisitor(indent + 1);
+      out.println("{");
+      ToJavaVisitor cv = new ToJavaVisitor(indent + 1, out);
       for (CAstNode child : n.getChildren()) {
-        cv.visit(child, c, cv);
+        if (child.getKind() != CAstNode.EMPTY) {
+          cv.visit(child, c, cv);
+        }
       }
       indent();
-      System.err.println("}");
+      out.println("}");
       return true;
     }
 
@@ -1509,9 +1624,13 @@ public class ToSource {
         CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
       Object v = n.getValue();
       if (v instanceof FieldReference) {
-        System.err.print(((FieldReference) v).getName().toString());
+        out.print(((FieldReference) v).getName().toString());
+      } else if (v instanceof Character) {
+        out.print("'" + v + "'");
+      } else if (v instanceof String) {
+        out.print('"' + (String) v + '"');
       } else {
-        System.err.print(v);
+        out.print(v);
       }
       return true;
     }
@@ -1519,18 +1638,16 @@ public class ToSource {
     @Override
     protected boolean visitVar(
         CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
-      System.err.print(n.getChild(0).getValue());
+      out.print(n.getChild(0).getValue());
       return true;
     }
 
     @Override
     public boolean visitAssign(
         CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
-      indent();
       visit(n.getChild(0), c, visitor);
-      System.err.print(" = ");
+      out.print(" = ");
       visit(n.getChild(1), c, visitor);
-      System.err.println(";");
       return true;
     }
 
@@ -1541,37 +1658,36 @@ public class ToSource {
       boolean isStatic = ((Boolean) n.getChild(1).getValue()).booleanValue();
       if ("<init>".equals(target.getName().toString())) {
         assert !isStatic;
-        TypeName type = target.getDeclaringClass().getName();
-        indent();
-        System.err.print(type + " ");
+        Atom type = target.getDeclaringClass().getName().getClassName();
         visit(n.getChild(2), c, this);
-        System.err.print(" = new " + type + "(");
+        out.print(" = new " + type + "(");
         for (int i = 3; i < n.getChildCount(); i++) {
           if (i != 3) {
-            System.err.print(", ");
+            out.print(", ");
           }
           visit(n.getChild(i), c, visitor);
         }
-        System.err.println(");");
       } else if (isStatic) {
+        Atom type = target.getDeclaringClass().getName().getClassName();
+        Atom name = target.getName();
+        out.print(type + "." + name + "(");
         for (int i = 2; i < n.getChildCount(); i++) {
           if (i != 2) {
-            System.err.print(", ");
+            out.print(", ");
           }
           visit(n.getChild(i), c, visitor);
         }
-        System.err.print(")");
       } else {
         visit(n.getChild(2), c, this);
-        System.err.print("." + target.getName() + "(");
+        out.print("." + target.getName() + "(");
         for (int i = 3; i < n.getChildCount(); i++) {
           if (i != 3) {
-            System.err.print(", ");
+            out.print(", ");
           }
           visit(n.getChild(i), c, visitor);
         }
-        System.err.print(")");
       }
+      out.print(")");
       return true;
     }
 
@@ -1579,20 +1695,31 @@ public class ToSource {
     protected boolean visitBlockExpr(
         CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
       for (int i = 0; i < n.getChildCount(); i++) {
-        visit(n.getChild(i), c, visitor);
-        System.err.println(";");
+        if (n.getChild(i).getKind() != CAstNode.EMPTY) {
+          visit(n.getChild(i), c, visitor);
+          out.println(";");
+        }
       }
+      return true;
+    }
+
+    @Override
+    protected boolean visitExprStmt(
+        CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
+      indent();
+      visit(n.getChild(0), c, visitor);
+      out.println(";");
       return true;
     }
 
     @Override
     protected boolean visitLoop(
         CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
-      ToJavaVisitor cv = new ToJavaVisitor(indent + 1);
+      ToJavaVisitor cv = new ToJavaVisitor(indent + 1, out);
       indent();
-      System.err.print("while (");
+      out.print("while (");
       cv.visit(n.getChild(0), c, cv);
-      System.err.println(")");
+      out.println(")");
       cv.visit(n.getChild(1), c, cv);
       return true;
     }
@@ -1600,15 +1727,15 @@ public class ToSource {
     @Override
     protected boolean visitIfStmt(
         CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
-      ToJavaVisitor cv = new ToJavaVisitor(indent + 1);
+      ToJavaVisitor cv = new ToJavaVisitor(indent + 1, out);
       indent();
-      System.err.print("if (");
+      out.print("if (");
       cv.visit(n.getChild(0), c, cv);
-      System.err.println(")");
+      out.println(")");
       cv.visit(n.getChild(1), c, cv);
       if (n.getChildCount() > 2) {
         indent();
-        System.err.println("else");
+        out.println("else");
         cv.visit(n.getChild(2), c, cv);
       }
       return true;
@@ -1627,7 +1754,7 @@ public class ToSource {
         case CAstNode.BREAK:
           {
             indent();
-            System.err.println("break");
+            out.println("break;");
             return true;
           }
         default:
@@ -1639,18 +1766,18 @@ public class ToSource {
     @Override
     protected boolean visitBinaryExpr(
         CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
-      System.err.print("(");
+      out.print("(");
       visit(n.getChild(1), c, this);
-      System.err.print(" " + n.getChild(0).getValue() + " ");
+      out.print(" " + n.getChild(0).getValue() + " ");
       visit(n.getChild(2), c, this);
-      System.err.print(")");
+      out.print(")");
       return true;
     }
 
     @Override
     protected boolean visitUnaryExpr(
         CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
-      System.err.print(n.getChild(0).getValue() + " ");
+      out.print(n.getChild(0).getValue() + " ");
       visit(n.getChild(1), c, this);
       return true;
     }
@@ -1658,7 +1785,7 @@ public class ToSource {
     @Override
     protected boolean visitCast(
         CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
-      System.err.print("(" + n.getChild(0).getValue() + ") ");
+      out.print("(" + ((CAstType) n.getChild(0).getValue()).getName() + ") ");
       visit(n.getChild(1), c, visitor);
       return true;
     }
@@ -1667,9 +1794,9 @@ public class ToSource {
     protected boolean visitArrayRef(
         CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
       visit(n.getChild(0), c, visitor);
-      System.err.print("[");
-      visit(n.getChild(1), c, visitor);
-      System.err.print("]");
+      out.print("[");
+      visit(n.getChild(2), c, visitor);
+      out.print("]");
       return true;
     }
 
@@ -1677,17 +1804,31 @@ public class ToSource {
     protected boolean visitObjectRef(
         CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
       visit(n.getChild(0), c, visitor);
-      System.err.print(".");
+      out.print(".");
       visit(n.getChild(1), c, visitor);
       return true;
     }
+
+    @Override
+    protected boolean visitNew(
+        CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
+      TypeReference type = (TypeReference) n.getChild(0).getValue();
+      if (type.isArrayType()) {
+        out.print("new " + type.getArrayElementType().getName().getClassName() + "[");
+        visit(n.getChild(1), c, visitor);
+        out.print("]");
+        return true;
+      } else {
+        return super.visitNew(n, c, visitor);
+      }
+    }
   }
 
-  public void toJava(IR ir, IClassHierarchy cha, TypeInference types) {
+  public void toJava(IR ir, IClassHierarchy cha, TypeInference types, PrintWriter out, int level) {
     PrunedCFG<SSAInstruction, ISSABasicBlock> cfg =
         ExceptionPrunedCFG.makeUncaught(ir.getControlFlowGraph());
     System.err.println(ir);
-    
+
     RegionTreeNode root = makeTreeNode(ir, cha, types, cfg);
 
     System.err.println("tree");
@@ -1698,18 +1839,19 @@ public class ToSource {
     CAst cast = new CAstImpl();
     MutableIntSet done = IntSetUtil.make();
     List<CAstNode> inits = new LinkedList<>();
-    root.mergedValues.foreach(
-        vn -> {
-          vn = root.mergePhis.find(vn);
-          if (!done.contains(vn)) {
-            done.add(vn);
-            inits.add(
-                cast.makeNode(
-                    CAstNode.DECL_STMT,
-                    cast.makeNode(CAstNode.VAR, cast.makeConstant("var_" + vn)),
-                    cast.makeConstant(types.getType(vn))));
-          }
-        });
+
+    DefUse du = new DefUse(ir);
+    for (int n = 1; n <= ir.getSymbolTable().getMaxValueNumber(); n++) {
+      int vn = root.mergePhis.find(n);
+      if (du.getDef(vn) instanceof SSAPhiInstruction && !done.contains(vn)) {
+        done.add(vn);
+        inits.add(
+            cast.makeNode(
+                CAstNode.DECL_STMT,
+                cast.makeNode(CAstNode.VAR, cast.makeConstant("var_" + vn)),
+                cast.makeConstant(toSource(types.getType(vn).getTypeReference()))));
+      }
+    }
 
     assert ast.getKind() == CAstNode.BLOCK_STMT;
     for (CAstNode c : ast.getChildren()) {
@@ -1717,7 +1859,7 @@ public class ToSource {
     }
     ast = cast.makeNode(CAstNode.BLOCK_STMT, inits);
 
-    ToJavaVisitor toJava = new ToJavaVisitor(0);
+    ToJavaVisitor toJava = new ToJavaVisitor(level, out);
     toJava.visit(ast, new TypeInferenceContext(types), toJava);
   }
 
@@ -1729,5 +1871,111 @@ public class ToSource {
     RegionTreeNode root =
         new RegionTreeNode(ir, cha, types, cfg.getNode(1).getLastInstruction(), cfg.getNode(2));
     return root;
+  }
+
+  protected static CAstType toSource(TypeReference type) {
+    if (type.isArrayType()) {
+      return new CAstType.Array() {
+
+        @Override
+        public Collection<CAstType> getSupertypes() {
+          return null;
+        }
+
+        @Override
+        public String getName() {
+          return toSource(type.getArrayElementType()).getName() + "[]";
+        }
+
+        @Override
+        public int getNumDimensions() {
+          CAstType elt = toSource(type.getArrayElementType());
+          if (elt instanceof CAstType.Array) {
+            return 1 + ((CAstType.Array) elt).getNumDimensions();
+          } else {
+            return 1;
+          }
+        }
+
+        @Override
+        public CAstType getElementType() {
+          return toSource(type.getArrayElementType());
+        }
+
+        @Override
+        public String toString() {
+          return getName();
+        }
+      };
+    } else if (type.isPrimitiveType()) {
+      return new CAstType.Primitive() {
+
+        @Override
+        public Collection<CAstType> getSupertypes() {
+          return null;
+        }
+
+        @Override
+        public String getName() {
+          if (Boolean.equals(type)) {
+            return "boolean";
+          } else if (Int.equals(type)) {
+            return "int";
+          } else if (Long.equals(type)) {
+            return "long";
+          } else if (Float.equals(type)) {
+            return "float";
+          } else if (Double.equals(type)) {
+            return "double";
+          } else if (Char.equals(type)) {
+            return "char";
+          } else if (Void.equals(type)) {
+            return "void";
+          } else {
+            assert false : type;
+            return null;
+          }
+        }
+
+        @Override
+        public String toString() {
+          return getName();
+        }
+      };
+    } else if (type.isClassType()) {
+      return new CAstType.Class() {
+
+        @Override
+        public Collection<CAstType> getSupertypes() {
+          // TODO Auto-generated method stub
+          return null;
+        }
+
+        @Override
+        public String getName() {
+          return type.getName().getClassName().toString();
+        }
+
+        @Override
+        public boolean isInterface() {
+          // TODO Auto-generated method stub
+          return false;
+        }
+
+        @Override
+        public Collection<CAstQualifier> getQualifiers() {
+          // TODO Auto-generated method stub
+          return null;
+        }
+
+        @Override
+        public String toString() {
+          return getName();
+        }
+      };
+    } else {
+      assert false;
+      return null;
+    }
   }
 }
