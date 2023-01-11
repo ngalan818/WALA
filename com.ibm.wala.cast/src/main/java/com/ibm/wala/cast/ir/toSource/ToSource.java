@@ -26,6 +26,7 @@ import com.ibm.wala.cast.tree.impl.CAstImpl;
 import com.ibm.wala.cast.tree.impl.CAstNodeTypeMapRecorder;
 import com.ibm.wala.cast.tree.impl.CAstOperator;
 import com.ibm.wala.cast.tree.visit.CAstVisitor;
+import com.ibm.wala.cfg.ControlFlowGraph;
 import com.ibm.wala.cfg.Util;
 import com.ibm.wala.cfg.cdg.ControlDependenceGraph;
 import com.ibm.wala.core.util.strings.Atom;
@@ -80,12 +81,15 @@ import com.ibm.wala.util.graph.EdgeManager;
 import com.ibm.wala.util.graph.Graph;
 import com.ibm.wala.util.graph.NodeManager;
 import com.ibm.wala.util.graph.traverse.DFS;
+import com.ibm.wala.util.graph.traverse.SCCIterator;
 import com.ibm.wala.util.graph.traverse.Topological;
 import com.ibm.wala.util.intset.BitVector;
 import com.ibm.wala.util.intset.IntSet;
 import com.ibm.wala.util.intset.IntSetUtil;
 import com.ibm.wala.util.intset.IntegerUnionFind;
 import com.ibm.wala.util.intset.MutableIntSet;
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintWriter;
 import java.util.Arrays;
 import java.util.Collection;
@@ -153,8 +157,8 @@ public class ToSource {
         || (inst instanceof SSAConversionInstruction)) {
       return true;
     } else if (inst instanceof SSAAbstractInvokeInstruction) {
-      TypeReference targetClass =
-          ((SSAAbstractInvokeInstruction) inst).getDeclaredTarget().getDeclaringClass();
+      MethodReference method = ((SSAAbstractInvokeInstruction) inst).getDeclaredTarget();
+      TypeReference targetClass = method.getDeclaringClass();
       targetClass = cha.lookupClass(targetClass).getReference();
       if ((targetClass == TypeReference.JavaLangBoolean)
           || (targetClass == TypeReference.JavaLangByte)
@@ -191,9 +195,16 @@ public class ToSource {
   private static class TreeBuilder {
     private boolean functionalOnly = false;
     private final IClassHierarchy cha;
+    private final ControlDependenceGraph<ISSABasicBlock> cdg;
+    private final ControlFlowGraph<SSAInstruction, ISSABasicBlock> cfg;
 
-    TreeBuilder(IClassHierarchy cha) {
+    TreeBuilder(
+        IClassHierarchy cha,
+        ControlFlowGraph<SSAInstruction, ISSABasicBlock> cfg,
+        ControlDependenceGraph<ISSABasicBlock> cdg) {
       this.cha = cha;
+      this.cdg = cdg;
+      this.cfg = cfg;
     }
 
     void gatherInstructions(
@@ -202,18 +213,27 @@ public class ToSource {
         DefUse du,
         Set<SSAInstruction> regionInsts,
         int vn,
-        Heap<Set<SSAInstruction>> chunks) {
+        Heap<Set<SSAInstruction>> chunks,
+        SSAInstruction loopControl) {
+      SSAInstruction inst = du.getDef(vn);
       if (ir.getSymbolTable().isConstant(vn)) {
         return;
       } else if (vn <= ir.getSymbolTable().getNumberOfParameters()) {
         return;
       } else if (du.getUseCount(vn) != 1) {
-        return;
-      } else {
-        SSAInstruction inst = du.getDef(vn);
-        assert inst != null;
-        gatherInstructions(stuff, ir, du, regionInsts, inst, chunks);
+        if (loopControl == null) {
+          return;
+        } else {
+          ISSABasicBlock loop = cfg.getBlockForInstruction(loopControl.iIndex());
+          ISSABasicBlock me = cfg.getBlockForInstruction(inst.iIndex());
+          if (!cdg.hasEdge(loop, me)) {
+            return;
+          }
+        }
       }
+
+      assert inst != null;
+      gatherInstructions(stuff, ir, du, regionInsts, inst, chunks, loopControl);
     }
 
     void gatherInstructions(
@@ -222,9 +242,10 @@ public class ToSource {
         DefUse du,
         Set<SSAInstruction> regionInsts,
         SSAInstruction inst,
-        Heap<Set<SSAInstruction>> chunks) {
+        Heap<Set<SSAInstruction>> chunks,
+        SSAInstruction loopControl) {
       if (!stuff.contains(inst) && regionInsts.contains(inst)) {
-        if (!deemedFunctional(inst, regionInsts, cha)) {
+        if (!(loopControl != null || deemedFunctional(inst, regionInsts, cha))) {
           if (functionalOnly) {
             return;
           } else {
@@ -234,7 +255,7 @@ public class ToSource {
         stuff.add(inst);
         chunks.insert(HashSetFactory.make(stuff));
         for (int i = 0; i < inst.getNumberOfUses(); i++) {
-          gatherInstructions(stuff, ir, du, regionInsts, inst.getUse(i), chunks);
+          gatherInstructions(stuff, ir, du, regionInsts, inst.getUse(i), chunks, loopControl);
         }
       }
     }
@@ -550,8 +571,10 @@ public class ToSource {
     private final PrunedCFG<SSAInstruction, ISSABasicBlock> cfg;
     private final Set<ISSABasicBlock> loopHeaders;
     private final Set<ISSABasicBlock> loopExits;
+    private final Set<ISSABasicBlock> loopControls;
     private final SSAInstruction r;
     private final ISSABasicBlock l;
+    private final ControlDependenceGraph<ISSABasicBlock> cdg;
     private Map<Integer, MutableIntSet> livenessConflicts;
     protected final Map<SSAInstruction, Map<ISSABasicBlock, RegionTreeNode>> children =
         HashMapFactory.make();
@@ -571,7 +594,9 @@ public class ToSource {
       this.cfg = parent.cfg;
       this.loopHeaders = parent.loopHeaders;
       this.loopExits = parent.loopExits;
+      this.loopControls = parent.loopControls;
       this.livenessConflicts = parent.livenessConflicts;
+      this.cdg = parent.cdg;
       initChildren();
     }
 
@@ -606,7 +631,7 @@ public class ToSource {
           }
         }
       }
-      ControlDependenceGraph<ISSABasicBlock> cdg = new ControlDependenceGraph<>(cfg, true);
+      cdg = new ControlDependenceGraph<>(cfg, true);
       System.err.println(cdg);
       IRToCAst.toCAst(ir)
           .entrySet()
@@ -627,8 +652,8 @@ public class ToSource {
                     Iterator<ISSABasicBlock> ps = cfg.getPredNodes(bb);
                     while (ps.hasNext()) {
                       ISSABasicBlock p = ps.next();
-                      if (cfgStartTimes.get(p) > cfgStartTimes.get(bb)
-                          && cfgFinishTimes.get(p) < cfgFinishTimes.get(bb)) {
+                      if (cfgStartTimes.get(p) >= cfgStartTimes.get(bb)
+                          && cfgFinishTimes.get(p) <= cfgFinishTimes.get(bb)) {
                         return true;
                       }
                     }
@@ -637,10 +662,35 @@ public class ToSource {
               .collect(Collectors.toSet());
 
       loopExits = HashSetFactory.make();
+      loopControls = HashSetFactory.make();
+      new SCCIterator<>(cfg)
+          .forEachRemaining(
+              scc -> {
+                if (!Collections.disjoint(scc, loopHeaders)) {
+                  scc.forEach(
+                      sccb -> {
+                        cfg.getSuccNodes(sccb)
+                            .forEachRemaining(
+                                sb -> {
+                                  if (!scc.contains(sb)) {
+                                    loopExits.add(sb);
+                                    if (cfg.getSuccNodeCount(sccb) == 2
+                                        && sccb.getLastInstruction()
+                                            instanceof SSAConditionalBranchInstruction) {
+                                      loopControls.add(sccb);
+                                    }
+                                  }
+                                });
+                      });
+                }
+              });
+
+      /*
       loopHeaders.forEach(
           lh -> {
             SSAInstruction inst = lh.getLastInstruction();
-            assert inst instanceof SSAConditionalBranchInstruction;
+            assert inst instanceof SSAConditionalBranchInstruction
+                : inst + " of " + inst.getClass() + " in " + lh;
             int bbn = ((SSAConditionalBranchInstruction) inst).getTarget();
             if (bbn < 0) {
               loopExits.add(cfg.exit());
@@ -648,6 +698,7 @@ public class ToSource {
               loopExits.add(cfg.getBlockForInstruction(bbn));
             }
           });
+      */
 
       ST = ir.getSymbolTable();
       mergedValues = IntSetUtil.make();
@@ -787,8 +838,19 @@ public class ToSource {
                 regionInsts.forEach(
                     inst -> {
                       Set<SSAInstruction> insts = HashSetFactory.make();
-                      (new TreeBuilder(cha))
-                          .gatherInstructions(insts, ir, du, regionInsts, inst, chunks);
+                      (new TreeBuilder(cha, cfg, cdg))
+                          .gatherInstructions(
+                              insts,
+                              ir,
+                              du,
+                              regionInsts,
+                              inst,
+                              chunks,
+                              (inst instanceof SSAConditionalBranchInstruction)
+                                      && loopControls.contains(
+                                          cfg.getBlockForInstruction(inst.iIndex()))
+                                  ? inst
+                                  : null);
                       System.err.println("chunk for " + inst + ": " + insts);
                     });
                 while (chunks.size() > 0 && !regionInsts.isEmpty()) {
@@ -898,21 +960,27 @@ public class ToSource {
     public CAstNode toCAst() {
       CAst ast = new CAstImpl();
       List<CAstNode> elts = new LinkedList<>();
+      List<CAstNode> decls = new LinkedList<>();
       Set<Set<SSAInstruction>> chunks = regionChunks.get(Pair.make(r, l));
       orderChunks(chunks)
           .forEach(
               chunkInsts -> {
                 if (!gotoChunk(chunkInsts)) {
-                  elts.add(makeToCAst(chunkInsts).processChunk());
+                  Pair<CAstNode, List<CAstNode>> stuff = makeToCAst(chunkInsts).processChunk();
+                  elts.add(stuff.fst);
+                  decls.addAll(stuff.snd);
                 }
               });
       chunks.stream()
           .filter(this::gotoChunk)
           .forEach(
               c -> {
-                elts.add(makeToCAst(c).processChunk());
+                Pair<CAstNode, List<CAstNode>> stuff = makeToCAst(c).processChunk();
+                elts.add(stuff.fst);
+                decls.addAll(stuff.snd);
               });
-      return ast.makeNode(CAstNode.BLOCK_STMT, elts.toArray(new CAstNode[elts.size()]));
+      decls.addAll(elts);
+      return ast.makeNode(CAstNode.BLOCK_STMT, decls.toArray(new CAstNode[decls.size()]));
     }
 
     protected ToCAst makeToCAst(Set<SSAInstruction> c) {
@@ -1005,12 +1073,15 @@ public class ToSource {
         private CAstNode node = ast.makeNode(CAstNode.EMPTY);
         private Set<SSAInstruction> chunk;
         private Map<SSAInstruction, Map<ISSABasicBlock, RegionTreeNode>> children;
+        private SSAInstruction root;
+        private final List<CAstNode> decls = new LinkedList<>();
 
         public Visitor(
             SSAInstruction root,
             TypeInferenceContext c,
             Set<SSAInstruction> chunk,
             Map<SSAInstruction, Map<ISSABasicBlock, RegionTreeNode>> children) {
+          this.root = root;
           this.chunk = chunk;
           this.children = children;
           root.visit(this);
@@ -1056,7 +1127,26 @@ public class ToSource {
             SSAInstruction inst = du.getDef(vn);
             if (chunk.contains(inst)) {
               inst.visit(this);
-              return node;
+              if (root instanceof SSAConditionalBranchInstruction
+                  && loopControls.contains(cfg.getBlockForInstruction(root.iIndex()))
+                  && inst.hasDef()
+                  && du.getNumberOfUses(vn) > 1) {
+
+                decls.add(
+                    ast.makeNode(
+                        CAstNode.DECL_STMT,
+                        ast.makeNode(CAstNode.VAR, ast.makeConstant("var_" + mergePhis.find(vn))),
+                        ast.makeConstant(toSource(c.getTypes().getType(vn).getTypeReference()))));
+
+                return ast.makeNode(
+                    CAstNode.BLOCK_EXPR,
+                    ast.makeNode(
+                        CAstNode.ASSIGN,
+                        ast.makeNode(CAstNode.VAR, ast.makeConstant("var_" + mergePhis.find(vn))),
+                        node));
+              } else {
+                return node;
+              }
             } else {
               return ast.makeNode(CAstNode.VAR, ast.makeConstant("var_" + mergePhis.find(vn)));
             }
@@ -1069,9 +1159,9 @@ public class ToSource {
           if (loopHeaders.containsAll(cfg.getNormalSuccessors(bb))) {
             //          node = ast.makeNode(CAstNode.CONTINUE);
           } else if (loopExits.containsAll(cfg.getNormalSuccessors(bb))) {
-            node = ast.makeNode(CAstNode.BREAK);
+            node = ast.makeNode(CAstNode.BLOCK_STMT, ast.makeNode(CAstNode.BREAK));
           } else {
-            node = ast.makeNode(CAstNode.GOTO);
+            node = ast.makeNode(CAstNode.BLOCK_STMT, ast.makeNode(CAstNode.GOTO));
           }
         }
 
@@ -1298,7 +1388,7 @@ public class ToSource {
 
           Map<ISSABasicBlock, RegionTreeNode> cc = children.get(instruction);
           ISSABasicBlock ibb = cfg.getBlockForInstruction(instruction.iIndex());
-          if (loopHeaders.contains(ibb)) {
+          if (loopControls.contains(ibb)) {
             assert cc.size() <= 2;
 
             ISSABasicBlock body = cfg.getBlockForInstruction(instruction.iIndex() + 1);
@@ -1388,7 +1478,7 @@ public class ToSource {
         }
 
         private List<CAstNode> handleBlock(Set<Set<SSAInstruction>> loopChunks, RegionTreeNode lr) {
-          List<CAstNode> block =
+          List<Pair<CAstNode, List<CAstNode>>> stuff =
               StreamSupport.stream(orderChunks(loopChunks).spliterator(), false)
                   .sorted(
                       (x, y) -> {
@@ -1398,6 +1488,9 @@ public class ToSource {
                       })
                   .map(c -> lr.makeToCAst(c).processChunk())
                   .collect(Collectors.toList());
+          List<CAstNode> block = new LinkedList<>();
+          stuff.forEach(p -> block.addAll(p.snd));
+          stuff.forEach(p -> block.add(p.fst));
           return block;
         }
 
@@ -1440,7 +1533,12 @@ public class ToSource {
                         CAstNode.ASSIGN,
                         ast.makeNode(
                             CAstNode.OBJECT_REF,
-                            ast.makeConstant(null),
+                            ast.makeConstant(
+                                instruction
+                                    .getDeclaredField()
+                                    .getDeclaringClass()
+                                    .getName()
+                                    .getClassName()),
                             ast.makeConstant(instruction.getDeclaredField())),
                         visit(instruction.getVal())));
           } else {
@@ -1563,13 +1661,13 @@ public class ToSource {
         this.c = c;
       }
 
-      CAstNode processChunk() {
+      Pair<CAstNode, List<CAstNode>> processChunk() {
         SSAInstruction root =
             ReverseIterator.reverse(
                     orderByInsts(chunk, ToSource::defSet, ToSource::useSet).iterator())
                 .next();
         Visitor x = makeVisitor(root, c, chunk);
-        return x.node;
+        return Pair.make(x.node, x.decls);
       }
     }
   }
@@ -1606,16 +1704,30 @@ public class ToSource {
     @Override
     protected boolean visitBlockStmt(
         CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
-      indent();
-      out.println("{");
-      ToJavaVisitor cv = new ToJavaVisitor(indent + 1, out);
-      for (CAstNode child : n.getChildren()) {
-        if (child.getKind() != CAstNode.EMPTY) {
-          cv.visit(child, c, cv);
+      try (ByteArrayOutputStream b = new ByteArrayOutputStream()) {
+        try (PrintWriter bw = new PrintWriter(b)) {
+
+          ToJavaVisitor cv = new ToJavaVisitor(indent + 1, bw);
+          for (CAstNode child : n.getChildren()) {
+            if (child.getKind() != CAstNode.EMPTY) {
+              cv.visit(child, c, cv);
+            }
+          }
+
+          bw.flush();
+          String javaText = b.toString();
+
+          if (javaText.length() > 0) {
+            indent();
+            out.println("{");
+            out.println(javaText);
+            indent();
+            out.println("}");
+          }
         }
+      } catch (IOException e) {
+        assert false : e;
       }
-      indent();
-      out.println("}");
       return true;
     }
 
@@ -1694,12 +1806,10 @@ public class ToSource {
     @Override
     protected boolean visitBlockExpr(
         CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
-      for (int i = 0; i < n.getChildCount(); i++) {
-        if (n.getChild(i).getKind() != CAstNode.EMPTY) {
-          visit(n.getChild(i), c, visitor);
-          out.println(";");
-        }
-      }
+      assert n.getChildCount() == 1;
+      out.print("(");
+      visit(n.getChild(0), c, visitor);
+      out.print(")");
       return true;
     }
 
@@ -1732,7 +1842,27 @@ public class ToSource {
       out.print("if (");
       cv.visit(n.getChild(0), c, cv);
       out.println(")");
-      cv.visit(n.getChild(1), c, cv);
+
+      try (ByteArrayOutputStream b = new ByteArrayOutputStream()) {
+        try (PrintWriter bw = new PrintWriter(b)) {
+
+          ToJavaVisitor cthen = new ToJavaVisitor(indent + 1, bw);
+          cthen.visit(n.getChild(1), c, cthen);
+
+          bw.flush();
+          String javaText = b.toString();
+
+          if (javaText.length() > 0) {
+            out.println(javaText);
+          } else {
+            indent();
+            out.println(" {}");
+          }
+        }
+      } catch (IOException e) {
+        assert false : e;
+      }
+
       if (n.getChildCount() > 2) {
         indent();
         out.println("else");
@@ -1760,6 +1890,19 @@ public class ToSource {
         default:
           break;
       }
+      return true;
+    }
+
+    @Override
+    protected boolean visitReturn(
+        CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
+      indent();
+      out.print("return");
+      if (n.getChildCount() > 0) {
+        out.print(" ");
+        visit(n.getChild(0), c, this);
+      }
+      out.println(";");
       return true;
     }
 
@@ -1805,7 +1948,11 @@ public class ToSource {
         CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
       visit(n.getChild(0), c, visitor);
       out.print(".");
-      visit(n.getChild(1), c, visitor);
+      if (n.getChild(1).getValue() instanceof String) {
+        out.print(n.getChild(1).getValue());
+      } else {
+        visit(n.getChild(1), c, visitor);
+      }
       return true;
     }
 
@@ -1814,7 +1961,8 @@ public class ToSource {
         CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
       TypeReference type = (TypeReference) n.getChild(0).getValue();
       if (type.isArrayType()) {
-        out.print("new " + type.getArrayElementType().getName().getClassName() + "[");
+        TypeReference eltType = type.getInnermostElementType();
+        out.print("new " + toSource(eltType) + "[");
         visit(n.getChild(1), c, visitor);
         out.print("]");
         return true;

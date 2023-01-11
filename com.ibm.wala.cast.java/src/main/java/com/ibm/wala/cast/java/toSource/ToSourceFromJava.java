@@ -110,6 +110,14 @@ public class ToSourceFromJava extends ToSource {
           out.println("import java.io.*;");
           out.println("import java.util.*;");
           out.println("public class " + clsName + " {");
+          for (IField fr : cls.getDeclaredStaticFields()) {
+            out.println(
+                "  static "
+                    + toSource(fr.getFieldTypeReference()).getName()
+                    + " "
+                    + fr.getName()
+                    + ";");
+          }
           for (IField fr : cls.getDeclaredInstanceFields()) {
             out.println(toSource(fr.getFieldTypeReference()).getName() + " " + fr.getName() + ";");
           }
