@@ -261,8 +261,7 @@ public abstract class JDTJava2CAstTranslator<T extends Position> {
     fIdentityMapper = new JDTIdentityMapper(fSourceLoader.getReference(), ast);
     fTypeDict = new JDTTypeDictionary(ast, fIdentityMapper);
 
-    fRuntimeExcType = ast.resolveWellKnownType("java.lang.RuntimeException");
-    assert fRuntimeExcType != null;
+    fRuntimeExcType = FakeExceptionTypeBinding.runtimeException;
   }
 
   public CAstEntity translateToCAst() {
@@ -762,6 +761,7 @@ public abstract class JDTJava2CAstTranslator<T extends Position> {
       // process Object in source...
 
       ITypeBinding superType = classBinding.getSuperclass();
+      assert superType != null : "superclass of " + classBinding + " has no default ctor";
 
       // find default constructor. IT is an error to have a constructor
       // without super() when the default constructor of the superclass does not exist.

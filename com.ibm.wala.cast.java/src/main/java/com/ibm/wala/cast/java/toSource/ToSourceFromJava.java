@@ -7,6 +7,7 @@ import com.ibm.wala.cast.java.ssa.AstJavaInstructionVisitor;
 import com.ibm.wala.cast.java.ssa.AstJavaInvokeInstruction;
 import com.ibm.wala.cast.java.ssa.EnclosingObjectReference;
 import com.ibm.wala.cast.loader.AstClass;
+import com.ibm.wala.cast.tree.CAstNode;
 import com.ibm.wala.classLoader.IClass;
 import com.ibm.wala.classLoader.IField;
 import com.ibm.wala.classLoader.IMethod;
@@ -26,6 +27,7 @@ import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Predicate;
@@ -55,7 +57,7 @@ public class ToSourceFromJava extends ToSource {
       }
 
       @Override
-      protected ToCAst makeToCAst(Set<SSAInstruction> c) {
+      protected ToCAst makeToCAst(List<SSAInstruction> c) {
         return new ToCAst(c, new TypeInferenceContext(types)) {
 
           class JavaVisitor extends Visitor implements AstJavaInstructionVisitor {
@@ -63,9 +65,10 @@ public class ToSourceFromJava extends ToSource {
             public JavaVisitor(
                 SSAInstruction root,
                 TypeInferenceContext c,
-                Set<SSAInstruction> chunk,
+                List<SSAInstruction> chunk,
+                List<CAstNode> parentDecls,
                 Map<SSAInstruction, Map<ISSABasicBlock, RegionTreeNode>> children) {
-              super(root, c, chunk, children);
+              super(root, c, chunk, parentDecls, children);
             }
 
             @Override
@@ -82,8 +85,11 @@ public class ToSourceFromJava extends ToSource {
 
           @Override
           protected Visitor makeVisitor(
-              SSAInstruction root, TypeInferenceContext c, Set<SSAInstruction> chunk) {
-            return new JavaVisitor(root, c, chunk, children);
+              SSAInstruction root,
+              TypeInferenceContext c,
+              List<SSAInstruction> chunk,
+              List<CAstNode> parentDecls) {
+            return new JavaVisitor(root, c, chunk, parentDecls, children);
           }
         };
       }

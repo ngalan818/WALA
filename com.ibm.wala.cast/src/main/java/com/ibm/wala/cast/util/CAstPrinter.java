@@ -219,16 +219,16 @@ public class CAstPrinter {
     return sb.toString();
   }
 
-  public String doPrint(CAstEntity ce) {
+  public String doPrint(CAstEntity ce, UglyBrackets uglyBrackets) {
     final StringBuilder sb = new StringBuilder();
     try (final StringWriter writer = new StringWriter(sb)) {
-      printTo(ce, writer);
+      printTo(ce, writer, uglyBrackets);
     }
     return sb.toString();
   }
 
-  public static String print(CAstEntity ce) {
-    return instance.doPrint(ce);
+  public static String print(CAstEntity ce, UglyBrackets uglyBrackets) {
+    return instance.doPrint(ce, uglyBrackets);
   }
 
   public static void printTo(CAstNode top, Writer w) {
@@ -396,30 +396,55 @@ public class CAstPrinter {
 
   public static void printTo(CAstEntity e, Writer w) {
     // anca: check if the writer is null
-    if (w != null) instance.doPrintTo(e, w);
+    if (w != null) instance.doPrintTo(e, w, NONE);
   }
 
-  protected void doPrintTo(CAstEntity e, Writer w) {
+  public static void printTo(CAstEntity e, Writer w, UglyBrackets uglyBrackets) {
+    // anca: check if the writer is null
+    if (w != null) instance.doPrintTo(e, w, uglyBrackets);
+  }
+
+  protected void doPrintTo(CAstEntity e, Writer w, UglyBrackets uglyBrackets) {
     try {
-      w.write(getEntityKindAsString(e.getKind()));
-      w.write(": ");
-      w.write(e.getName());
-      w.write('\n');
-      if (e.getArgumentNames().length > 0) {
-        w.write("(");
-        String[] names = e.getArgumentNames();
-        for (String name : names) {
-          w.write("  " + name);
+      if (uglyBrackets == JSON) {
+        w.write("{ \"entityType\": \"" + getEntityKindAsString(e.getKind()) + "\", ");
+        w.write("  \"name\": \"" + e.getName() + "\",");
+        if (e.getArgumentNames().length > 0) {
+          w.write(" \"arguments\": [");
+          String[] names = e.getArgumentNames();
+          for (String name : names) {
+            w.write("\"" + name + "\", ");
+          }
+          w.write("], ");
         }
-        w.write("  )\n");
+
+      } else {
+        w.write(getEntityKindAsString(e.getKind()));
+        w.write(": ");
+        w.write(e.getName());
+        w.write('\n');
+        if (e.getArgumentNames().length > 0) {
+          w.write("(");
+          String[] names = e.getArgumentNames();
+          for (String name : names) {
+            w.write("  " + name);
+          }
+          w.write("  )\n");
+        }
       }
       if (e.getAST() != null) {
-        doPrintTo(e.getAST(), e.getSourceMap(), w);
+        if (uglyBrackets == JSON) {
+          w.write("ast: [");
+        }
+        printTo(e.getAST(), e.getSourceMap(), w, 0, uglyBrackets);
         w.write('\n');
       }
       for (Collection<CAstEntity> collection : e.getAllScopedEntities().values()) {
         for (CAstEntity entity : collection) {
-          doPrintTo(entity, w);
+          doPrintTo(entity, w, uglyBrackets);
+        }
+        if (uglyBrackets == JSON) {
+          w.write("]");
         }
       }
       w.flush();

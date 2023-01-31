@@ -37,13 +37,15 @@ public class Util {
   /** Does basic block b end with a conditional branch instruction? */
   public static boolean endsWithConditionalBranch(
       ControlFlowGraph<? extends SSAInstruction, ?> G, IBasicBlock<?> b) {
-    return getLastInstruction(G, b) instanceof SSAConditionalBranchInstruction;
+    return b.getLastInstructionIndex() >= 0
+        && getLastInstruction(G, b) instanceof SSAConditionalBranchInstruction;
   }
 
   /** Does basic block b end with a switch instruction? */
   public static boolean endsWithSwitch(
       ControlFlowGraph<? extends SSAInstruction, ?> G, IBasicBlock<?> b) {
-    return getLastInstruction(G, b) instanceof SSASwitchInstruction;
+    return b.getLastInstructionIndex() >= 0
+        && getLastInstruction(G, b) instanceof SSASwitchInstruction;
   }
 
   /**

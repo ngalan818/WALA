@@ -26,6 +26,7 @@ import com.ibm.wala.cast.tree.impl.CAstImpl;
 import com.ibm.wala.cast.tree.impl.CAstNodeTypeMapRecorder;
 import com.ibm.wala.cast.tree.impl.CAstOperator;
 import com.ibm.wala.cast.tree.visit.CAstVisitor;
+import com.ibm.wala.cast.util.CAstPattern;
 import com.ibm.wala.cfg.ControlFlowGraph;
 import com.ibm.wala.cfg.Util;
 import com.ibm.wala.cfg.cdg.ControlDependenceGraph;
@@ -43,7 +44,6 @@ import com.ibm.wala.ssa.ISSABasicBlock;
 import com.ibm.wala.ssa.SSAAbstractInvokeInstruction;
 import com.ibm.wala.ssa.SSAArrayLengthInstruction;
 import com.ibm.wala.ssa.SSAArrayLoadInstruction;
-import com.ibm.wala.ssa.SSAArrayStoreInstruction;
 import com.ibm.wala.ssa.SSABinaryOpInstruction;
 import com.ibm.wala.ssa.SSACheckCastInstruction;
 import com.ibm.wala.ssa.SSAComparisonInstruction;
@@ -75,14 +75,14 @@ import com.ibm.wala.util.collections.HashSetFactory;
 import com.ibm.wala.util.collections.Heap;
 import com.ibm.wala.util.collections.NonNullSingletonIterator;
 import com.ibm.wala.util.collections.Pair;
-import com.ibm.wala.util.collections.ReverseIterator;
-import com.ibm.wala.util.graph.AbstractGraph;
-import com.ibm.wala.util.graph.EdgeManager;
 import com.ibm.wala.util.graph.Graph;
-import com.ibm.wala.util.graph.NodeManager;
+import com.ibm.wala.util.graph.GraphSlicer;
+import com.ibm.wala.util.graph.impl.GraphInverter;
+import com.ibm.wala.util.graph.impl.SlowSparseNumberedGraph;
 import com.ibm.wala.util.graph.traverse.DFS;
 import com.ibm.wala.util.graph.traverse.SCCIterator;
 import com.ibm.wala.util.graph.traverse.Topological;
+import com.ibm.wala.util.intset.BasicNaturalRelation;
 import com.ibm.wala.util.intset.BitVector;
 import com.ibm.wala.util.intset.IntSet;
 import com.ibm.wala.util.intset.IntSetUtil;
@@ -91,7 +91,6 @@ import com.ibm.wala.util.intset.MutableIntSet;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintWriter;
-import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -100,9 +99,13 @@ import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.Spliterator;
+import java.util.Spliterators;
 import java.util.function.BiFunction;
 import java.util.function.BiPredicate;
+import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -110,47 +113,25 @@ import java.util.stream.StreamSupport;
 
 public class ToSource {
 
-  static MutableIntSet xSet(
-      SSAInstruction inst,
-      Function<SSAInstruction, Integer> count,
-      BiFunction<SSAInstruction, Integer, Integer> elt) {
-    MutableIntSet xu = IntSetUtil.make();
-    for (int i = 0; i < count.apply(inst); i++) {
-      xu.add(elt.apply(inst, i));
-    }
-
-    return xu;
+  private static <T> Stream<T> streamify(Iterable<T> stuff) {
+    return streamify(stuff.iterator());
   }
 
-  static MutableIntSet xSet(
-      Set<SSAInstruction> insts,
-      Function<SSAInstruction, Integer> count,
-      BiFunction<SSAInstruction, Integer, Integer> elt) {
-    MutableIntSet xu = IntSetUtil.make();
-    for (SSAInstruction inst : insts) {
-      xu.addAll(xSet(inst, count, elt));
-    }
-    return xu;
+  private static <T> Stream<T> streamify(Iterator<T> iterator) {
+    return StreamSupport.stream(
+        Spliterators.spliteratorUnknownSize(iterator, Spliterator.ORDERED), false);
   }
 
-  static MutableIntSet useSet(SSAInstruction inst) {
-    return xSet(inst, SSAInstruction::getNumberOfUses, SSAInstruction::getUse);
+  private static CAstPattern varDefPattern(String varName) {
+    return CAstPattern.parse("DECL_STMT(VAR(\"" + varName + "\"),**)");
   }
 
-  static MutableIntSet defSet(SSAInstruction inst) {
-    return xSet(inst, SSAInstruction::getNumberOfDefs, SSAInstruction::getDef);
-  }
-
-  static MutableIntSet usesSet(Set<SSAInstruction> inst) {
-    return xSet(inst, SSAInstruction::getNumberOfUses, SSAInstruction::getUse);
-  }
-
-  static MutableIntSet defsSet(Set<SSAInstruction> inst) {
-    return xSet(inst, SSAInstruction::getNumberOfDefs, SSAInstruction::getDef);
+  private static CAstPattern varUsePattern(String varName) {
+    return CAstPattern.parse("VAR(\"" + varName + "\")");
   }
 
   private static boolean deemedFunctional(
-      SSAInstruction inst, Set<SSAInstruction> regionInsts, IClassHierarchy cha) {
+      SSAInstruction inst, List<SSAInstruction> regionInsts, IClassHierarchy cha) {
     if ((inst instanceof SSABinaryOpInstruction)
         || (inst instanceof SSAUnaryOpInstruction)
         || (inst instanceof SSAComparisonInstruction)
@@ -159,7 +140,9 @@ public class ToSource {
     } else if (inst instanceof SSAAbstractInvokeInstruction) {
       MethodReference method = ((SSAAbstractInvokeInstruction) inst).getDeclaredTarget();
       TypeReference targetClass = method.getDeclaringClass();
-      targetClass = cha.lookupClass(targetClass).getReference();
+      if (cha.lookupClass(targetClass) != null) {
+        targetClass = cha.lookupClass(targetClass).getReference();
+      }
       if ((targetClass == TypeReference.JavaLangBoolean)
           || (targetClass == TypeReference.JavaLangByte)
           || (targetClass == TypeReference.JavaLangCharacter)
@@ -173,7 +156,9 @@ public class ToSource {
     } else if (inst instanceof SSAGetInstruction) {
       FieldReference read = ((SSAGetInstruction) inst).getDeclaredField();
       TypeReference cls = read.getDeclaringClass();
-      // cls = cha.lookupClass(cls).getReference();
+      if (cha.lookupClass(cls) != null) {
+        cls = cha.lookupClass(cls).getReference();
+      }
       if (((SSAGetInstruction) inst).isStatic() && cls == TypeReference.JavaLangSystem) {
         return true;
       }
@@ -198,7 +183,7 @@ public class ToSource {
     private final ControlDependenceGraph<ISSABasicBlock> cdg;
     private final ControlFlowGraph<SSAInstruction, ISSABasicBlock> cfg;
 
-    TreeBuilder(
+    private TreeBuilder(
         IClassHierarchy cha,
         ControlFlowGraph<SSAInstruction, ISSABasicBlock> cfg,
         ControlDependenceGraph<ISSABasicBlock> cdg) {
@@ -207,14 +192,16 @@ public class ToSource {
       this.cfg = cfg;
     }
 
-    void gatherInstructions(
+    private void gatherInstructions(
         Set<SSAInstruction> stuff,
         IR ir,
         DefUse du,
-        Set<SSAInstruction> regionInsts,
+        List<SSAInstruction> regionInsts,
         int vn,
-        Heap<Set<SSAInstruction>> chunks,
-        SSAInstruction loopControl) {
+        Heap<List<SSAInstruction>> chunks,
+        SSAInstruction loopControl,
+        int limit,
+        IntSet unmergeableValues) {
       SSAInstruction inst = du.getDef(vn);
       if (ir.getSymbolTable().isConstant(vn)) {
         return;
@@ -226,36 +213,67 @@ public class ToSource {
         } else {
           ISSABasicBlock loop = cfg.getBlockForInstruction(loopControl.iIndex());
           ISSABasicBlock me = cfg.getBlockForInstruction(inst.iIndex());
-          if (!cdg.hasEdge(loop, me)) {
+          if (loop != me && !cdg.hasEdge(loop, me)) {
             return;
           }
         }
       }
 
       assert inst != null;
-      gatherInstructions(stuff, ir, du, regionInsts, inst, chunks, loopControl);
+      if (inst.iIndex() <= limit) {
+        gatherInstructions(
+            stuff, ir, du, regionInsts, inst, chunks, unmergeableValues, loopControl);
+      }
     }
 
-    void gatherInstructions(
+    private void gatherInstructions(
         Set<SSAInstruction> stuff,
         IR ir,
         DefUse du,
-        Set<SSAInstruction> regionInsts,
+        List<SSAInstruction> regionInsts,
         SSAInstruction inst,
-        Heap<Set<SSAInstruction>> chunks,
+        Heap<List<SSAInstruction>> chunks,
+        IntSet unmergeableValues,
         SSAInstruction loopControl) {
       if (!stuff.contains(inst) && regionInsts.contains(inst)) {
-        if (!(loopControl != null || deemedFunctional(inst, regionInsts, cha))) {
-          if (functionalOnly) {
+
+        boolean depOk = false;
+        if (loopControl != null) {
+          ISSABasicBlock loop = cfg.getBlockForInstruction(loopControl.iIndex());
+          ISSABasicBlock me = cfg.getBlockForInstruction(inst.iIndex());
+          if (loop == me || cdg.hasEdge(loop, me)) {
+            System.err.println("depOK: " + loop + " " + me);
+            depOk = true;
+          }
+        }
+
+        if (!depOk && !deemedFunctional(inst, regionInsts, cha)) {
+          if (loopControl != null || functionalOnly) {
+            if (stuff.isEmpty()) {
+              stuff.add(inst);
+              chunks.insert(new LinkedList<>(stuff));
+            }
             return;
           } else {
             functionalOnly = true;
           }
         }
+
         stuff.add(inst);
-        chunks.insert(HashSetFactory.make(stuff));
+        chunks.insert(new LinkedList<>(stuff));
         for (int i = 0; i < inst.getNumberOfUses(); i++) {
-          gatherInstructions(stuff, ir, du, regionInsts, inst.getUse(i), chunks, loopControl);
+          if (!unmergeableValues.contains(inst.getUse(i)) && !(inst instanceof AssignInstruction)) {
+            gatherInstructions(
+                stuff,
+                ir,
+                du,
+                regionInsts,
+                inst.getUse(i),
+                chunks,
+                loopControl,
+                inst.iIndex(),
+                unmergeableValues);
+          }
         }
       }
     }
@@ -420,150 +438,12 @@ public class ToSource {
 
   protected static class RegionTreeNode {
 
-    <T> Iterable<T> orderByInsts(
-        Set<T> chunks, Function<T, IntSet> defSet, Function<T, IntSet> useSet) {
-      return orderByInsts(chunks, defSet, useSet, (l, r) -> false);
-    }
-
-    <T> Iterable<T> orderByInsts(
-        Set<T> chunks,
-        Function<T, IntSet> defSet,
-        Function<T, IntSet> useSet,
-        BiPredicate<T, T> cfg) {
-      if (chunks == null) {
-        return Collections.emptyList();
-      }
-      Graph<T> G =
-          new AbstractGraph<T>() {
-            private final NodeManager<T> nm =
-                new NodeManager<T>() {
-
-                  @Override
-                  public Stream<T> stream() {
-                    return chunks.stream();
-                  }
-
-                  @Override
-                  public int getNumberOfNodes() {
-                    return chunks.size();
-                  }
-
-                  @Override
-                  public void addNode(T n) {
-                    throw new UnsupportedOperationException();
-                  }
-
-                  @Override
-                  public void removeNode(T n) throws UnsupportedOperationException {
-                    throw new UnsupportedOperationException();
-                  }
-
-                  @Override
-                  public boolean containsNode(T n) {
-                    return chunks.contains(n);
-                  }
-                };
-
-            @Override
-            protected NodeManager<T> getNodeManager() {
-              return nm;
-            }
-
-            private final EdgeManager<T> em =
-                new EdgeManager<T>() {
-
-                  private final Map<T, Set<T>> forwardEdges = HashMapFactory.make();
-                  private final Map<T, Set<T>> backwardEdges = HashMapFactory.make();
-
-                  {
-                    for (T left : chunks) {
-                      for (T right : chunks) {
-                        if (cfg.test(left, right)
-                            || defSet.apply(left).containsAny(useSet.apply(right))) {
-                          if (!forwardEdges.containsKey(left)) {
-                            forwardEdges.put(left, HashSetFactory.make());
-                          }
-                          if (!backwardEdges.containsKey(right)) {
-                            backwardEdges.put(right, HashSetFactory.make());
-                          }
-                          forwardEdges.get(left).add(right);
-                          backwardEdges.get(right).add(left);
-                        }
-                      }
-                    }
-                  }
-
-                  @Override
-                  public Iterator<T> getPredNodes(T n) {
-                    return backwardEdges.containsKey(n)
-                        ? backwardEdges.get(n).iterator()
-                        : EmptyIterator.instance();
-                  }
-
-                  @Override
-                  public int getPredNodeCount(T n) {
-                    return backwardEdges.containsKey(n) ? backwardEdges.get(n).size() : 0;
-                  }
-
-                  @Override
-                  public Iterator<T> getSuccNodes(T n) {
-                    return forwardEdges.containsKey(n)
-                        ? forwardEdges.get(n).iterator()
-                        : EmptyIterator.instance();
-                  }
-
-                  @Override
-                  public int getSuccNodeCount(T N) {
-                    return forwardEdges.containsKey(N) ? forwardEdges.get(N).size() : 0;
-                  }
-
-                  @Override
-                  public boolean hasEdge(T src, T dst) {
-                    return forwardEdges.containsKey(src)
-                        ? forwardEdges.get(src).contains(dst)
-                        : false;
-                  }
-
-                  @Override
-                  public void addEdge(T src, T dst) {
-                    throw new UnsupportedOperationException();
-                  }
-
-                  @Override
-                  public void removeEdge(T src, T dst) throws UnsupportedOperationException {
-                    throw new UnsupportedOperationException();
-                  }
-
-                  @Override
-                  public void removeAllIncidentEdges(T node) throws UnsupportedOperationException {
-                    throw new UnsupportedOperationException();
-                  }
-
-                  @Override
-                  public void removeIncomingEdges(T node) throws UnsupportedOperationException {
-                    throw new UnsupportedOperationException();
-                  }
-
-                  @Override
-                  public void removeOutgoingEdges(T node) throws UnsupportedOperationException {
-                    throw new UnsupportedOperationException();
-                  }
-                };
-
-            @Override
-            protected EdgeManager<T> getEdgeManager() {
-              return em;
-            }
-          };
-
-      return Topological.makeTopologicalIter(G);
-    }
-
     private final IClassHierarchy cha;
     private final TypeInference types;
     private final Map<Set<Pair<SSAInstruction, ISSABasicBlock>>, Set<ISSABasicBlock>> regions;
-    private final Map<Pair<SSAInstruction, ISSABasicBlock>, Set<SSAInstruction>> linePhis;
-    private final Map<Pair<SSAInstruction, ISSABasicBlock>, Set<Set<SSAInstruction>>> regionChunks;
+    private final Map<Pair<SSAInstruction, ISSABasicBlock>, List<SSAInstruction>> linePhis;
+    private final Map<Pair<SSAInstruction, ISSABasicBlock>, List<List<SSAInstruction>>>
+        regionChunks;
     private final MutableIntSet mergedValues;
     private final IntegerUnionFind mergePhis;
     private final SymbolTable ST;
@@ -575,9 +455,50 @@ public class ToSource {
     private final SSAInstruction r;
     private final ISSABasicBlock l;
     private final ControlDependenceGraph<ISSABasicBlock> cdg;
-    private Map<Integer, MutableIntSet> livenessConflicts;
+    private BasicNaturalRelation livenessConflicts;
     protected final Map<SSAInstruction, Map<ISSABasicBlock, RegionTreeNode>> children =
         HashMapFactory.make();
+
+    private Pair<BasicNaturalRelation, Iterable<SSAPhiInstruction>> orderPhisAndDetectCycles(
+        Iterator<SSAPhiInstruction> blockPhis) {
+      Graph<SSAPhiInstruction> G = SlowSparseNumberedGraph.make();
+      blockPhis.forEachRemaining(phi -> G.addNode(phi));
+      G.iterator()
+          .forEachRemaining(
+              p -> {
+                G.iterator()
+                    .forEachRemaining(
+                        s -> {
+                          for (int i = 0; i < s.getNumberOfUses(); i++) {
+                            int d = mergePhis.find(p.getDef());
+                            int u = mergePhis.find(s.getUse(i));
+                            if (d == u && !G.hasEdge(s, p)) {
+                              G.addEdge(s, p);
+                            }
+                          }
+                        });
+              });
+
+      BasicNaturalRelation rename = new BasicNaturalRelation();
+      System.err.println("phi scc: ------- ");
+      new SCCIterator<>(G)
+          .forEachRemaining(
+              new Consumer<Set<SSAPhiInstruction>>() {
+                private int idx = ST.getMaxValueNumber() + 1;
+
+                @Override
+                public void accept(Set<SSAPhiInstruction> t) {
+                  System.err.println("phi scc: " + t);
+                  if (t.size() > 1) {
+                    System.err.println(
+                        mergePhis.find(t.iterator().next().getDef()) + " --> " + idx);
+                    rename.add(mergePhis.find(t.iterator().next().getDef()), idx++);
+                  }
+                }
+              });
+
+      return Pair.make(rename, Topological.makeTopologicalIter(G));
+    }
 
     public RegionTreeNode(RegionTreeNode parent, SSAInstruction r, ISSABasicBlock l) {
       this.r = r;
@@ -598,6 +519,33 @@ public class ToSource {
       this.livenessConflicts = parent.livenessConflicts;
       this.cdg = parent.cdg;
       initChildren();
+      System.err.println("added children for " + r + "," + l + ": " + children);
+    }
+
+    private static boolean hasAllByIdentity(List<SSAInstruction> all, List<SSAInstruction> some) {
+      return !some.stream()
+          .filter(si -> !all.stream().anyMatch(ai -> ai == si))
+          .findFirst()
+          .isPresent();
+    }
+
+    private static void removeAllByIdentity(List<SSAInstruction> all, List<SSAInstruction> some) {
+      for (Iterator<SSAInstruction> insts = all.iterator(); insts.hasNext(); ) {
+        SSAInstruction inst = insts.next();
+        if (some.stream().anyMatch(si -> si == inst)) {
+          insts.remove();
+        }
+      }
+    }
+
+    private static int positionByIdentity(List<SSAInstruction> all, SSAInstruction item) {
+      for (int i = 0; i < all.size(); i++) {
+        if (all.get(i) == item) {
+          return i;
+        }
+      }
+
+      return -1;
     }
 
     public RegionTreeNode(
@@ -608,29 +556,59 @@ public class ToSource {
       this.types = types;
       du = new DefUse(ir);
       cfg = ExceptionPrunedCFG.makeUncaught(ir.getControlFlowGraph());
-      livenessConflicts = HashMapFactory.make();
+
+      livenessConflicts = new BasicNaturalRelation();
       LiveAnalysis.Result liveness = LiveAnalysis.perform(ir);
-      System.err.println("liveness");
-      System.err.println(liveness);
+      cfg.forEach(
+          bb -> {
+            List<BiFunction<ISSABasicBlock, Integer, Boolean>> lfs = new LinkedList<>();
+            lfs.add(liveness::isLiveEntry);
+            lfs.add(liveness::isLiveExit);
+            for (BiFunction<ISSABasicBlock, Integer, Boolean> get : lfs) {
+              for (int i = 1; i <= ir.getSymbolTable().getMaxValueNumber(); i++) {
+                if (get.apply(bb, i)) {
+                  for (int j = i + 1; j <= ir.getSymbolTable().getMaxValueNumber(); j++) {
+                    if (get.apply(bb, j)) {
+                      livenessConflicts.add(i, j);
+                      livenessConflicts.add(j, i);
+                    }
+                  }
+                }
+              }
+            }
+            bb.iteratePhis()
+                .forEachRemaining(
+                    p1 -> {
+                      bb.iteratePhis()
+                          .forEachRemaining(
+                              p2 -> {
+                                if (p1 != p2) {
+                                  livenessConflicts.add(p1.getDef(), p2.getDef());
+                                }
+                              });
+                    });
+          });
+      List<Function<Integer, BitVector>> lfs = new LinkedList<>();
+      lfs.add(liveness::getLiveBefore);
+      // lfs.add(liveness::getLiveAfter);
       for (SSAInstruction inst : ir.getInstructions()) {
         if (inst != null) {
-          BitVector live = liveness.getLiveBefore(inst.iIndex());
-          int lv = 0;
-          while ((lv = live.nextSetBit(lv + 1)) > 0) {
-            int rv = lv + 1;
-            while ((rv = live.nextSetBit(rv + 1)) > 0) {
-              if (!livenessConflicts.containsKey(lv)) {
-                livenessConflicts.put(lv, IntSetUtil.make());
-              }
-              livenessConflicts.get(lv).add(rv);
-              if (!livenessConflicts.containsKey(rv)) {
-                livenessConflicts.put(rv, IntSetUtil.make());
-              }
-              livenessConflicts.get(rv).add(lv);
-            }
-          }
+          lfs.forEach(
+              f -> {
+                BitVector live = f.apply(inst.iIndex());
+                int lv = 0;
+                while ((lv = live.nextSetBit(lv + 1)) > 0) {
+                  int rv = lv + 1;
+                  while ((rv = live.nextSetBit(rv + 1)) > 0) {
+                    livenessConflicts.add(rv, lv);
+                    livenessConflicts.add(lv, rv);
+                  }
+                }
+              });
         }
       }
+      System.err.println("liveness conflicts");
+      System.err.println(livenessConflicts);
       cdg = new ControlDependenceGraph<>(cfg, true);
       System.err.println(cdg);
       IRToCAst.toCAst(ir)
@@ -645,15 +623,19 @@ public class ToSource {
       Map<ISSABasicBlock, Integer> cfgStartTimes =
           computeStartTimes(() -> NonNullSingletonIterator.make(cfg.entry()), cfg);
 
+      BiPredicate<ISSABasicBlock, ISSABasicBlock> isBackEdge =
+          (pred, succ) ->
+              cfgStartTimes.get(pred) >= cfgStartTimes.get(succ)
+                  && cfgFinishTimes.get(pred) <= cfgFinishTimes.get(succ);
+
       loopHeaders =
           cfg.stream()
               .filter(
                   bb -> {
                     Iterator<ISSABasicBlock> ps = cfg.getPredNodes(bb);
                     while (ps.hasNext()) {
-                      ISSABasicBlock p = ps.next();
-                      if (cfgStartTimes.get(p) >= cfgStartTimes.get(bb)
-                          && cfgFinishTimes.get(p) <= cfgFinishTimes.get(bb)) {
+                      ISSABasicBlock pred = ps.next();
+                      if (isBackEdge.test(pred, bb)) {
                         return true;
                       }
                     }
@@ -661,84 +643,143 @@ public class ToSource {
                   })
               .collect(Collectors.toSet());
 
+      System.err.println("loop headers: " + loopHeaders);
+
       loopExits = HashSetFactory.make();
       loopControls = HashSetFactory.make();
-      new SCCIterator<>(cfg)
-          .forEachRemaining(
-              scc -> {
-                if (!Collections.disjoint(scc, loopHeaders)) {
-                  scc.forEach(
-                      sccb -> {
-                        cfg.getSuccNodes(sccb)
-                            .forEachRemaining(
-                                sb -> {
-                                  if (!scc.contains(sb)) {
-                                    loopExits.add(sb);
-                                    if (cfg.getSuccNodeCount(sccb) == 2
-                                        && sccb.getLastInstruction()
-                                            instanceof SSAConditionalBranchInstruction) {
-                                      loopControls.add(sccb);
-                                    }
-                                  }
-                                });
-                      });
-                }
-              });
+      Graph<ISSABasicBlock> cfgNoBack = GraphSlicer.prune(cfg, (p, s) -> !isBackEdge.test(p, s));
+      cfg.forEach(
+          n -> {
+            cfg.getPredNodes(n)
+                .forEachRemaining(
+                    p -> {
+                      if (isBackEdge.test(p, n)) {
+                        System.err.println("back:" + p + " --> " + n);
 
-      /*
-      loopHeaders.forEach(
-          lh -> {
-            SSAInstruction inst = lh.getLastInstruction();
-            assert inst instanceof SSAConditionalBranchInstruction
-                : inst + " of " + inst.getClass() + " in " + lh;
-            int bbn = ((SSAConditionalBranchInstruction) inst).getTarget();
-            if (bbn < 0) {
-              loopExits.add(cfg.exit());
-            } else {
-              loopExits.add(cfg.getBlockForInstruction(bbn));
-            }
+                        Set<ISSABasicBlock> forward =
+                            DFS.getReachableNodes(cfgNoBack, Collections.singleton(n));
+                        Set<ISSABasicBlock> backward =
+                            DFS.getReachableNodes(
+                                GraphInverter.invert(cfgNoBack), Collections.singleton(p));
+
+                        Set<ISSABasicBlock> loop = HashSetFactory.make(forward);
+                        loop.retainAll(backward);
+
+                        System.err.println("loop: " + loop);
+
+                        loop.forEach(
+                            bb -> {
+                              streamify(cfg.getSuccNodes(bb))
+                                  .filter(b -> !loop.contains(b))
+                                  .forEach(sb -> loopExits.add(sb));
+                            });
+
+                        loopControls.add(
+                            loop.stream()
+                                .filter(
+                                    bb -> {
+                                      System.err.println("1: " + bb);
+                                      return streamify(cfg.getSuccNodes(bb))
+                                          .anyMatch(
+                                              b -> {
+                                                return !loop.contains(b);
+                                              });
+                                    })
+                                .filter(
+                                    bb -> {
+                                      System.err.println(
+                                          "2: "
+                                              + bb
+                                              + ": "
+                                              + DFS.getReachableNodes(
+                                                  GraphSlicer.prune(
+                                                      cfgNoBack, (pb, s) -> pb.equals(bb)),
+                                                  Collections.singleton(n)));
+
+                                      return n.equals(bb)
+                                          || !DFS.getReachableNodes(
+                                                  GraphSlicer.prune(
+                                                      cfgNoBack, (pb, s) -> pb.equals(bb)),
+                                                  Collections.singleton(n))
+                                              .contains(p);
+                                    })
+                                .sorted(
+                                    (a, b) -> {
+                                      return a.getFirstInstructionIndex()
+                                          - b.getFirstInstructionIndex();
+                                    })
+                                .findFirst()
+                                .get());
+                      }
+                    });
           });
-      */
+
+      System.err.println("loop controls: " + loopControls);
+
+      for (ISSABasicBlock b : cfg) {
+        if (loopHeaders.contains(b)) {
+          System.err.println("bad flow: starting " + b);
+          cfg.getPredNodes(b)
+              .forEachRemaining(
+                  s -> {
+                    System.err.println("bad flow: pred " + s);
+                    if (isBackEdge.test(s, b)) {
+                      System.err.println("bad flow: back edge");
+                      int n = Util.whichPred(cfg, s, b);
+                      b.iteratePhis()
+                          .forEachRemaining(
+                              phi -> {
+                                System.err.println("bad flow: phi " + phi);
+                                int vn = phi.getUse(n);
+                                SSAInstruction def = du.getDef(vn);
+                                System.err.println("bad flow: def " + def);
+                                if (def instanceof SSAPhiInstruction) {
+                                  System.err.println("bad flow: " + vn + " --> " + phi.getDef());
+                                  for (int i = 0; i < def.getNumberOfUses(); i++) {
+                                    livenessConflicts.add(def.getDef(), def.getUse(i));
+                                  }
+                                }
+                              });
+                    }
+                  });
+        }
+      }
 
       ST = ir.getSymbolTable();
       mergedValues = IntSetUtil.make();
       mergePhis = new IntegerUnionFind(ST.getMaxValueNumber());
-      /*
-            ir.getControlFlowGraph()
-                .iterator()
-                .forEachRemaining(
-                    bb -> {
-                      bb.iteratePhis()
-                          .forEachRemaining(
-                              phi -> {
-                                int def = phi.getDef();
-                                for (int i = 0; i < phi.getNumberOfUses(); i++) {
-                                  int use = phi.getUse(i);
-                                  int min = Math.min(def, use);
-                                  int max = Math.max(def, use);
-                                  if (!ST.isConstant(use)
-                                      && (!livenessConflicts.containsKey(min)
-                                          || !livenessConflicts.get(min).contains(max))
-                                      && (!livenessConflicts.containsKey(max)
-                                          || !livenessConflicts.get(max).contains(min))) {
-                                    if (!livenessConflicts.containsKey(max)) {
-                                      livenessConflicts.put(max, IntSetUtil.make());
-                                    }
-                                    if (!livenessConflicts.containsKey(min)) {
-                                      livenessConflicts.put(min, IntSetUtil.make());
-                                    }
+      ir.getControlFlowGraph()
+          .iterator()
+          .forEachRemaining(
+              bb -> {
+                bb.iteratePhis()
+                    .forEachRemaining(
+                        phi -> {
+                          int def = phi.getDef();
+                          for (int i = 0; i < phi.getNumberOfUses(); i++) {
+                            int use = phi.getUse(i);
+                            if (!ST.isConstant(use) && !livenessConflicts.contains(def, use)) {
+                              IntSet currentDefConflicts = livenessConflicts.getRelated(def);
+                              IntSet currentUseConflicts = livenessConflicts.getRelated(use);
+                              currentDefConflicts.foreach(
+                                  vn -> {
+                                    livenessConflicts.add(mergePhis.find(use), mergePhis.find(vn));
+                                    livenessConflicts.add(mergePhis.find(vn), mergePhis.find(use));
+                                  });
+                              currentUseConflicts.foreach(
+                                  vn -> {
+                                    livenessConflicts.add(mergePhis.find(def), mergePhis.find(vn));
+                                    livenessConflicts.add(mergePhis.find(vn), mergePhis.find(def));
+                                  });
 
-                                    livenessConflicts.get(max).addAll(livenessConflicts.get(min));
-                                    livenessConflicts.get(min).addAll(livenessConflicts.get(max));
-
-                                    mergePhis.union(min, max);
-                                    mergedValues.add(use);
-                                    mergedValues.add(def);
-                                  }
-                                }
-                              });
-                    });
-      */
+                              System.err.println("merging " + def + " and " + use);
+                              mergePhis.union(def, use);
+                              mergedValues.add(use);
+                              mergedValues.add(def);
+                            }
+                          }
+                        });
+              });
       regions = HashMapFactory.make();
       linePhis = HashMapFactory.make();
       cdg.forEach(
@@ -750,8 +791,7 @@ public class ToSource {
                       cdg.getEdgeLabels(p, node)
                           .forEach(
                               lbl -> {
-                                if (!(cfgStartTimes.get(p) >= cfgStartTimes.get(node)
-                                    && cfgFinishTimes.get(p) <= cfgFinishTimes.get(node))) {
+                                if (!(isBackEdge.test(p, node))) {
                                   regionKey.add(
                                       Pair.make(p.getLastInstruction(), (ISSABasicBlock) lbl));
                                 }
@@ -771,13 +811,16 @@ public class ToSource {
                 System.err.println(es.getKey());
                 System.err.println(es.getValue());
               });
+
+      MutableIntSet unmergeableValues = IntSetUtil.make();
       regionChunks = HashMapFactory.make();
       regions
           .entrySet()
           .forEach(
               es -> {
-                Set<SSAInstruction> regionInsts = HashSetFactory.make();
-                es.getValue()
+                List<SSAInstruction> regionInsts = new LinkedList<>();
+                es.getValue().stream()
+                    .sorted((a, b) -> a.getLastInstructionIndex() - b.getLastInstructionIndex())
                     .forEach(
                         bb -> {
                           bb.iterator()
@@ -790,16 +833,85 @@ public class ToSource {
                           cfg.getSuccNodes(bb)
                               .forEachRemaining(
                                   sb -> {
-                                    sb.iteratePhis()
+                                    boolean backEdge =
+                                        bb.getLastInstructionIndex() >= 0
+                                            && sb.getLastInstructionIndex() >= 0
+                                            && bb.getLastInstructionIndex()
+                                                < sb.getFirstInstructionIndex();
+                                    List<SSAInstruction> ii;
+                                    if ((Util.endsWithConditionalBranch(cfg, bb)
+                                            && (Util.getTakenSuccessor(cfg, bb).equals(sb)
+                                                || Util.getNotTakenSuccessor(cfg, bb).equals(bb)))
+                                        || (Util.endsWithSwitch(cfg, bb)
+                                            && Util.getFallThruBlock(cfg, bb).equals(sb))) {
+
+                                      Pair<SSAInstruction, ISSABasicBlock> lineKey =
+                                          Pair.make(bb.getLastInstruction(), sb);
+                                      if (!linePhis.containsKey(lineKey)) {
+                                        linePhis.put(lineKey, new LinkedList<>());
+                                      }
+                                      ii = linePhis.get(lineKey);
+                                    } else {
+                                      ii = regionInsts;
+                                    }
+
+                                    Pair<BasicNaturalRelation, Iterable<SSAPhiInstruction>> order =
+                                        orderPhisAndDetectCycles(sb.iteratePhis());
+                                    System.err.println("order: " + order);
+
+                                    order
+                                        .snd
+                                        .iterator()
                                         .forEachRemaining(
                                             phi -> {
+                                              System.err.println(
+                                                  "phi at "
+                                                      + bb
+                                                      + " with "
+                                                      + bb.getLastInstruction()
+                                                      + " "
+                                                      + cfg.getSuccNodeCount(bb));
                                               int lv = phi.getDef();
                                               int rv = phi.getUse(Util.whichPred(cfg, bb, sb));
                                               if (mergePhis.find(lv) != mergePhis.find(rv)) {
+                                                int lh = lv, rh = rv;
+                                                if (order.fst.anyRelated(mergePhis.find(rv))) {
+
+                                                  int tmp =
+                                                      order
+                                                          .fst
+                                                          .getRelated(mergePhis.find(rv))
+                                                          .intIterator()
+                                                          .next();
+                                                  ir.getSymbolTable().ensureSymbol(tmp);
+                                                  ii.add(
+                                                      new AssignInstruction(
+                                                          bb.getLastInstructionIndex() + 1,
+                                                          tmp,
+                                                          mergePhis.find(rv)));
+
+                                                  lh = mergePhis.find(lv);
+                                                  rh =
+                                                      order
+                                                          .fst
+                                                          .getRelated(mergePhis.find(rv))
+                                                          .intIterator()
+                                                          .next();
+                                                }
                                                 AssignInstruction assign =
                                                     new AssignInstruction(
-                                                        bb.getLastInstructionIndex() + 1, lv, rv);
-
+                                                        bb.getLastInstructionIndex() + 1, lh, rh);
+                                                if (backEdge
+                                                    && sb.getLastInstruction()
+                                                        instanceof
+                                                        SSAConditionalBranchInstruction) {
+                                                  System.err.println(
+                                                      "back edge for "
+                                                          + sb.getLastInstructionIndex());
+                                                  System.err.println("back edge for " + assign);
+                                                  System.err.println(
+                                                      "back edge for " + es.getKey());
+                                                }
                                                 if (Util.endsWithConditionalBranch(cfg, bb)
                                                     && (Util.getTakenSuccessor(cfg, bb).equals(sb)
                                                         || Util.getNotTakenSuccessor(cfg, bb)
@@ -813,28 +925,29 @@ public class ToSource {
                                                           + rv
                                                           + " -> "
                                                           + lv);
-                                                  Pair<SSAInstruction, ISSABasicBlock> lineKey =
-                                                      Pair.make(bb.getLastInstruction(), sb);
-                                                  if (!linePhis.containsKey(lineKey)) {
-                                                    linePhis.put(lineKey, HashSetFactory.make());
-                                                  }
-                                                  linePhis.get(lineKey).add(assign);
-                                                } else {
-                                                  regionInsts.add(assign);
                                                 }
+
+                                                System.err.println("adding " + assign);
+                                                ii.add(assign);
                                               }
                                             });
                                   });
                         });
 
-                Heap<Set<SSAInstruction>> chunks =
-                    new Heap<Set<SSAInstruction>>(regionInsts.size()) {
+                Heap<List<SSAInstruction>> chunks =
+                    new Heap<List<SSAInstruction>>(regionInsts.size()) {
                       @Override
                       protected boolean compareElements(
-                          Set<SSAInstruction> elt1, Set<SSAInstruction> elt2) {
-                        return elt1.size() > elt2.size();
+                          List<SSAInstruction> elt1, List<SSAInstruction> elt2) {
+                        return elt1.size() > elt2.size()
+                            ? true
+                            : elt1.size() < elt2.size()
+                                ? false
+                                : elt1.toString().compareTo(elt2.toString()) > 0;
                       }
                     };
+                System.err.println("insts: " + regionInsts);
+                List<SSAInstruction> all = new LinkedList<>(regionInsts);
                 regionInsts.forEach(
                     inst -> {
                       Set<SSAInstruction> insts = HashSetFactory.make();
@@ -846,30 +959,60 @@ public class ToSource {
                               regionInsts,
                               inst,
                               chunks,
+                              unmergeableValues,
                               (inst instanceof SSAConditionalBranchInstruction)
                                       && loopControls.contains(
                                           cfg.getBlockForInstruction(inst.iIndex()))
                                   ? inst
                                   : null);
+                      if (insts.isEmpty()) {
+                        insts.add(inst);
+                      }
                       System.err.println("chunk for " + inst + ": " + insts);
                     });
+                System.err.println("chunks: " + chunks);
                 while (chunks.size() > 0 && !regionInsts.isEmpty()) {
-                  Set<SSAInstruction> chunk = chunks.take();
-                  if (regionInsts.containsAll(chunk)) {
-                    regionInsts.removeAll(chunk);
-                    System.err.println("using " + chunk);
+                  List<SSAInstruction> chunk = chunks.take();
+                  System.err.println(
+                      "taking "
+                          + chunk.stream()
+                              .map(i -> i + " " + i.iIndex())
+                              .reduce("", (a, b) -> a + ", " + b));
+                  if (hasAllByIdentity(regionInsts, chunk)) {
+                    removeAllByIdentity(regionInsts, chunk);
+                    System.err.println(
+                        "using "
+                            + chunk.stream()
+                                .map(i -> i + " " + i.iIndex())
+                                .reduce("", (a, b) -> a + ", " + b));
                     es.getKey()
                         .forEach(
                             p -> {
                               if (!regionChunks.containsKey(p)) {
-                                regionChunks.put(p, HashSetFactory.make());
+                                regionChunks.put(p, new LinkedList<>());
                               }
                               regionChunks.get(p).add(chunk);
                             });
                   }
                 }
-                assert regionInsts.isEmpty();
+
+                es.getKey()
+                    .forEach(
+                        p -> {
+                          if (regionChunks.containsKey(p)) {
+                            regionChunks
+                                .get(p)
+                                .sort(
+                                    (lc, rc) ->
+                                        positionByIdentity(all, lc.iterator().next())
+                                            - positionByIdentity(all, rc.iterator().next()));
+                          }
+                        });
+
+                assert regionInsts.isEmpty() : regionInsts + " remaining, with chunks " + chunks;
               });
+
+      System.err.println("root region chunks: " + regionChunks);
 
       ir.iterateNormalInstructions()
           .forEachRemaining(
@@ -898,15 +1041,25 @@ public class ToSource {
                           es.getKey()
                               .forEach(
                                   k -> {
+                                    System.err.println(
+                                        "checking " + k.fst + " with " + bb.getLastInstruction());
                                     if (k.fst == bb.getLastInstruction()) {
                                       if (!children.containsKey(k.fst)) {
                                         children.put(k.fst, HashMapFactory.make());
                                       }
                                       children.get(k.fst).put(k.snd, makeChild(k));
+                                      System.err.println(
+                                          "child of "
+                                              + k.fst
+                                              + " for "
+                                              + k.snd
+                                              + " is "
+                                              + children.get(k.fst).get(k.snd));
                                     }
                                   });
                         });
               });
+      System.err.println("children for " + this + ": " + children);
     }
 
     protected RegionTreeNode makeChild(Pair<SSAInstruction, ISSABasicBlock> k) {
@@ -934,17 +1087,18 @@ public class ToSource {
     }
     */
 
-    private boolean gotoChunk(Set<SSAInstruction> insts) {
+    private boolean gotoChunk(List<SSAInstruction> insts) {
       return insts.size() == 1 && insts.iterator().next() instanceof SSAGotoInstruction;
     }
 
-    boolean controlOrderedInChunk(SSAInstruction l, SSAInstruction r, Set<SSAInstruction> chunk) {
+    boolean controlOrderedInChunk(SSAInstruction l, SSAInstruction r, List<SSAInstruction> chunk) {
       return !(deemedFunctional(l, chunk, cha) && deemedFunctional(r, chunk, cha))
           && l.iIndex() < r.iIndex();
     }
 
+    /*
     boolean controlOrderedChunks(
-        Set<SSAInstruction> ls, Set<SSAInstruction> rs, Set<SSAInstruction> insts) {
+        List<SSAInstruction> ls, List<SSAInstruction> rs, List<SSAInstruction> insts) {
       for (SSAInstruction l : ls) {
         if (!deemedFunctional(l, insts, cha)) {
           for (SSAInstruction r : rs) {
@@ -956,26 +1110,26 @@ public class ToSource {
       }
       return false;
     }
+    */
 
     public CAstNode toCAst() {
       CAst ast = new CAstImpl();
       List<CAstNode> elts = new LinkedList<>();
       List<CAstNode> decls = new LinkedList<>();
-      Set<Set<SSAInstruction>> chunks = regionChunks.get(Pair.make(r, l));
-      orderChunks(chunks)
-          .forEach(
-              chunkInsts -> {
-                if (!gotoChunk(chunkInsts)) {
-                  Pair<CAstNode, List<CAstNode>> stuff = makeToCAst(chunkInsts).processChunk();
-                  elts.add(stuff.fst);
-                  decls.addAll(stuff.snd);
-                }
-              });
+      List<List<SSAInstruction>> chunks = regionChunks.get(Pair.make(r, l));
+      chunks.forEach(
+          chunkInsts -> {
+            if (!gotoChunk(chunkInsts)) {
+              Pair<CAstNode, List<CAstNode>> stuff = makeToCAst(chunkInsts).processChunk(decls);
+              elts.add(stuff.fst);
+              decls.addAll(stuff.snd);
+            }
+          });
       chunks.stream()
           .filter(this::gotoChunk)
           .forEach(
               c -> {
-                Pair<CAstNode, List<CAstNode>> stuff = makeToCAst(c).processChunk();
+                Pair<CAstNode, List<CAstNode>> stuff = makeToCAst(c).processChunk(decls);
                 elts.add(stuff.fst);
                 decls.addAll(stuff.snd);
               });
@@ -983,52 +1137,21 @@ public class ToSource {
       return ast.makeNode(CAstNode.BLOCK_STMT, decls.toArray(new CAstNode[decls.size()]));
     }
 
-    protected ToCAst makeToCAst(Set<SSAInstruction> c) {
-      return new ToCAst(c, new TypeInferenceContext(types));
-    }
-
-    private static int chunkIndex(Set<SSAInstruction> chunk) {
-      Iterator<SSAInstruction> insts = chunk.iterator();
-      while (insts.hasNext()) {
-        SSAInstruction inst = insts.next();
-        if (!(inst instanceof AssignInstruction)) {
-          return inst.iIndex();
-        }
-      }
-      return chunk.iterator().next().iIndex();
-    }
-
-    private static List<Set<SSAInstruction>> orderChunks(Set<Set<SSAInstruction>> chunks) {
-      Set<SSAInstruction>[] cs = chunks.toArray(new Set[chunks.size()]);
-      Arrays.sort(cs, (l, r) -> chunkIndex(l) - chunkIndex(r));
-      return Arrays.asList(cs);
+    protected ToCAst makeToCAst(List<SSAInstruction> insts) {
+      return new ToCAst(insts, new TypeInferenceContext(types));
     }
 
     private void toString(StringBuffer text, int level) {
-      Set<Set<SSAInstruction>> chunks = regionChunks.get(Pair.make(r, l));
+      List<List<SSAInstruction>> chunks = regionChunks.get(Pair.make(r, l));
       if (chunks == null) {
         return;
       }
-      Set<SSAInstruction> allInsts =
-          chunks.stream()
-              .reduce(
-                  (l, r) -> {
-                    Set<SSAInstruction> b = HashSetFactory.make(l);
-                    b.addAll(r);
-                    return b;
-                  })
-              .get();
-      orderChunks(chunks)
-          .forEach(
-              insts -> {
-                if (!gotoChunk(insts)) {
-                  Iterable<SSAInstruction> ii =
-                      orderByInsts(
-                          insts,
-                          ToSource::defSet,
-                          ToSource::useSet,
-                          (x, y) -> controlOrderedInChunk(x, y, allInsts));
-                  ii.forEach(
+      chunks.forEach(
+          insts -> {
+            if (!gotoChunk(insts)) {
+              insts
+                  .iterator()
+                  .forEachRemaining(
                       i -> {
                         indent(text, level + 1);
                         text.append(i).append("\n");
@@ -1046,8 +1169,8 @@ public class ToSource {
                           text.append("---\n");
                         }
                       });
-                }
-              });
+            }
+          });
       chunks.stream()
           .filter(this::gotoChunk)
           .forEach(
@@ -1064,26 +1187,30 @@ public class ToSource {
       return sb.toString();
     }
 
+    private final CAst ast = new CAstImpl();
+
     protected class ToCAst {
-      private final CAst ast = new CAstImpl();
-      private final Set<SSAInstruction> chunk;
+      private final List<SSAInstruction> chunk;
       private final TypeInferenceContext c;
 
       protected class Visitor implements AstPreInstructionVisitor {
         private CAstNode node = ast.makeNode(CAstNode.EMPTY);
-        private Set<SSAInstruction> chunk;
+        private List<SSAInstruction> chunk;
         private Map<SSAInstruction, Map<ISSABasicBlock, RegionTreeNode>> children;
         private SSAInstruction root;
+        protected final List<CAstNode> parentDecls;
         private final List<CAstNode> decls = new LinkedList<>();
 
         public Visitor(
             SSAInstruction root,
             TypeInferenceContext c,
-            Set<SSAInstruction> chunk,
+            List<SSAInstruction> chunk2,
+            List<CAstNode> parentDecls,
             Map<SSAInstruction, Map<ISSABasicBlock, RegionTreeNode>> children) {
           this.root = root;
-          this.chunk = chunk;
+          this.chunk = chunk2;
           this.children = children;
+          this.parentDecls = parentDecls;
           root.visit(this);
           if (root.hasDef()) {
             int def = root.getDef();
@@ -1100,14 +1227,31 @@ public class ToSource {
                           val));
             } else {
               CAstNode val = node;
+              CAstType type;
+              try {
+                type = toSource(c.getTypes().getType(def).getTypeReference());
+              } catch (IndexOutOfBoundsException e) {
+                type = toSource(TypeReference.Int);
+              }
               node =
                   ast.makeNode(
                       CAstNode.DECL_STMT,
                       ast.makeNode(CAstNode.VAR, ast.makeConstant("var_" + mergePhis.find(def))),
-                      ast.makeConstant(toSource(c.getTypes().getType(def).getTypeReference())),
+                      ast.makeConstant(type),
                       val);
             }
           }
+        }
+
+        private boolean checkDecls(int def, List<CAstNode> decls) {
+          return decls.stream()
+              .noneMatch(d -> varDefPattern("var_" + mergePhis.find(def)).match(d, null));
+        }
+
+        private boolean checkDecl(int def) {
+          return ST.getNumberOfParameters() < def
+              && checkDecls(def, decls)
+              && checkDecls(def, parentDecls);
         }
 
         private CAstNode visit(int vn) {
@@ -1132,11 +1276,13 @@ public class ToSource {
                   && inst.hasDef()
                   && du.getNumberOfUses(vn) > 1) {
 
-                decls.add(
-                    ast.makeNode(
-                        CAstNode.DECL_STMT,
-                        ast.makeNode(CAstNode.VAR, ast.makeConstant("var_" + mergePhis.find(vn))),
-                        ast.makeConstant(toSource(c.getTypes().getType(vn).getTypeReference()))));
+                if (checkDecl(mergePhis.find(vn))) {
+                  decls.add(
+                      ast.makeNode(
+                          CAstNode.DECL_STMT,
+                          ast.makeNode(CAstNode.VAR, ast.makeConstant("var_" + mergePhis.find(vn))),
+                          ast.makeConstant(toSource(c.getTypes().getType(vn).getTypeReference()))));
+                }
 
                 return ast.makeNode(
                     CAstNode.BLOCK_EXPR,
@@ -1171,19 +1317,6 @@ public class ToSource {
           CAstNode index = visit(instruction.getIndex());
           CAstNode elt = ast.makeConstant(toSource(instruction.getElementType()));
           node = ast.makeNode(CAstNode.ARRAY_REF, array, elt, index);
-        }
-
-        @Override
-        public void visitArrayStore(SSAArrayStoreInstruction instruction) {
-          CAstNode array = visit(instruction.getArrayRef());
-          CAstNode index = visit(instruction.getIndex());
-          CAstNode value = visit(instruction.getValue());
-          CAstNode elt = ast.makeConstant(toSource(instruction.getElementType()));
-          node =
-              ast.makeNode(
-                  CAstNode.EXPR_STMT,
-                  ast.makeNode(
-                      CAstNode.ASSIGN, ast.makeNode(CAstNode.ARRAY_REF, array, elt, index), value));
         }
 
         @Override
@@ -1318,17 +1451,8 @@ public class ToSource {
                   + "in "
                   + linePhis);
           if (linePhis.containsKey(key)) {
-            List<CAstNode> lp = new LinkedList<>();
-            for (SSAInstruction inst : linePhis.get(key)) {
-              assert inst instanceof AssignInstruction;
-              Visitor v =
-                  makeToCAst(linePhis.get(key)).makeVisitor(inst, c, Collections.singleton(inst));
-              lp.add(
-                  ast.makeNode(
-                      CAstNode.EXPR_STMT,
-                      ast.makeNode(
-                          CAstNode.ASSIGN, v.visit(inst.getDef()), v.visit(inst.getUse(0)))));
-            }
+            List<SSAInstruction> insts = linePhis.get(key);
+            List<CAstNode> lp = handlePhiAssignments(insts);
             if (block != null) {
               lp.add(block);
             }
@@ -1338,9 +1462,25 @@ public class ToSource {
           }
         }
 
+        private List<CAstNode> handlePhiAssignments(List<SSAInstruction> insts) {
+          List<CAstNode> lp = new LinkedList<>();
+          for (SSAInstruction inst : insts) {
+            assert inst instanceof AssignInstruction;
+            Visitor v =
+                makeToCAst(insts)
+                    .makeVisitor(inst, c, Collections.singletonList(inst), parentDecls);
+            lp.add(
+                ast.makeNode(
+                    CAstNode.EXPR_STMT,
+                    ast.makeNode(
+                        CAstNode.ASSIGN, v.visit(inst.getDef()), v.visit(inst.getUse(0)))));
+          }
+          return lp;
+        }
+
         @Override
         public void visitConditionalBranch(SSAConditionalBranchInstruction instruction) {
-          assert children.containsKey(instruction) : children;
+          assert children.containsKey(instruction) : "children of " + instruction + ":" + children;
 
           CAstOperator castOp = null;
           IConditionalBranchInstruction.IOperator op = instruction.getOperator();
@@ -1387,12 +1527,12 @@ public class ToSource {
           }
 
           Map<ISSABasicBlock, RegionTreeNode> cc = children.get(instruction);
-          ISSABasicBlock ibb = cfg.getBlockForInstruction(instruction.iIndex());
-          if (loopControls.contains(ibb)) {
+          ISSABasicBlock branchBB = cfg.getBlockForInstruction(instruction.iIndex());
+          if (loopControls.contains(branchBB)) {
             assert cc.size() <= 2;
 
             ISSABasicBlock body = cfg.getBlockForInstruction(instruction.iIndex() + 1);
-            Set<Set<SSAInstruction>> loopChunks = regionChunks.get(Pair.make(instruction, body));
+            List<List<SSAInstruction>> loopChunks = regionChunks.get(Pair.make(instruction, body));
             RegionTreeNode lr = cc.get(body);
             List<CAstNode> loopBlock = handleBlock(loopChunks, lr);
 
@@ -1403,13 +1543,16 @@ public class ToSource {
                     ast.makeNode(
                         CAstNode.BLOCK_STMT, loopBlock.toArray(new CAstNode[loopBlock.size()])));
 
+            ISSABasicBlock next = cfg.getBlockForInstruction(instruction.getTarget());
+            node = checkLinePhi(node, instruction, next);
+
             if (cc.size() > 1) {
               HashMap<ISSABasicBlock, RegionTreeNode> copy = HashMapFactory.make(cc);
               assert copy.remove(body) != null;
               ISSABasicBlock after = copy.keySet().iterator().next();
               assert after != null;
 
-              Set<Set<SSAInstruction>> afterChunks =
+              List<List<SSAInstruction>> afterChunks =
                   regionChunks.get(Pair.make(instruction, after));
               RegionTreeNode ar = cc.get(after);
               List<CAstNode> afterBlock = handleBlock(afterChunks, ar);
@@ -1429,7 +1572,7 @@ public class ToSource {
               HashMap<ISSABasicBlock, RegionTreeNode> copy = HashMapFactory.make(cc);
               assert copy.remove(taken) != null;
               notTaken = copy.keySet().iterator().next();
-              Set<Set<SSAInstruction>> takenChunks =
+              List<List<SSAInstruction>> takenChunks =
                   regionChunks.get(Pair.make(instruction, taken));
               RegionTreeNode tr = cc.get(taken);
               takenBlock = handleBlock(takenChunks, tr);
@@ -1442,7 +1585,7 @@ public class ToSource {
 
             Pair<SSAConditionalBranchInstruction, ISSABasicBlock> notTakenKey =
                 Pair.make(instruction, notTaken);
-            Set<Set<SSAInstruction>> notTakenChunks = regionChunks.get(notTakenKey);
+            List<List<SSAInstruction>> notTakenChunks = regionChunks.get(notTakenKey);
             RegionTreeNode fr = cc.get(notTaken);
             List<CAstNode> notTakenBlock = handleBlock(notTakenChunks, fr);
 
@@ -1477,26 +1620,77 @@ public class ToSource {
           }
         }
 
-        private List<CAstNode> handleBlock(Set<Set<SSAInstruction>> loopChunks, RegionTreeNode lr) {
-          List<Pair<CAstNode, List<CAstNode>>> stuff =
-              StreamSupport.stream(orderChunks(loopChunks).spliterator(), false)
-                  .sorted(
-                      (x, y) -> {
-                        boolean gx = x.iterator().next() instanceof SSAGotoInstruction;
-                        boolean gy = y.iterator().next() instanceof SSAGotoInstruction;
-                        return (gx ? 1 : -1) + (gy ? -1 : 1);
-                      })
-                  .map(c -> lr.makeToCAst(c).processChunk())
-                  .collect(Collectors.toList());
+        private List<CAstNode> handleBlock(
+            List<List<SSAInstruction>> loopChunks, RegionTreeNode lr) {
+
+          List<Pair<CAstNode, List<CAstNode>>> normalStuff =
+              handleInsts(
+                  loopChunks, lr, x -> !(x.iterator().next() instanceof SSAGotoInstruction));
+
+          List<Pair<CAstNode, List<CAstNode>>> gotoStuff =
+              handleInsts(loopChunks, lr, x -> x.iterator().next() instanceof SSAGotoInstruction);
+
           List<CAstNode> block = new LinkedList<>();
-          stuff.forEach(p -> block.addAll(p.snd));
-          stuff.forEach(p -> block.add(p.fst));
+          normalStuff.forEach(p -> block.addAll(p.snd));
+          gotoStuff.forEach(p -> block.addAll(p.snd));
+          normalStuff.forEach(p -> block.add(p.fst));
+          gotoStuff.forEach(p -> block.add(p.fst));
+          System.err.println("final block: " + block);
           return block;
+        }
+
+        private List<Pair<CAstNode, List<CAstNode>>> handleInsts(
+            List<List<SSAInstruction>> loopChunks,
+            RegionTreeNode lr,
+            Predicate<? super List<SSAInstruction>> assignFilter) {
+          if (loopChunks == null || loopChunks.isEmpty()) {
+            return Collections.emptyList();
+          } else {
+            return streamify(loopChunks)
+                .filter(assignFilter)
+                .map(c -> lr.makeToCAst(c).processChunk(parentDecls))
+                .collect(Collectors.toList());
+          }
         }
 
         @Override
         public void visitSwitch(SSASwitchInstruction instruction) {
-          // TODO Auto-generated method stub
+          assert children.containsKey(instruction) : "children of " + instruction + ":" + children;
+
+          CAstNode value = visit(instruction.getUse(0));
+          List<CAstNode> switchCode = new LinkedList<>();
+          Map<ISSABasicBlock, RegionTreeNode> cc = children.get(instruction);
+          int[] casesAndLabels = instruction.getCasesAndLabels();
+          for (int i = 0; i < casesAndLabels.length - 1; i++) {
+            CAstNode caseValue = ast.makeConstant(casesAndLabels[i]);
+            i++;
+            ISSABasicBlock caseBlock = cfg.getBlockForInstruction(casesAndLabels[i]);
+            List<List<SSAInstruction>> labelChunks =
+                regionChunks.get(Pair.make(instruction, caseBlock));
+            RegionTreeNode fr = cc.get(caseBlock);
+            List<CAstNode> labelBlock = handleBlock(labelChunks, fr);
+            switchCode.add(
+                ast.makeNode(
+                    CAstNode.LABEL_STMT,
+                    caseValue,
+                    ast.makeNode(
+                        CAstNode.BLOCK_STMT, labelBlock.toArray(new CAstNode[labelBlock.size()]))));
+          }
+
+          assert instruction.getDefault() != -1;
+          ISSABasicBlock defaultBlock = cfg.getBlockForInstruction(instruction.getDefault());
+          List<List<SSAInstruction>> defaultChunks =
+              regionChunks.get(Pair.make(instruction, defaultBlock));
+          RegionTreeNode fr = cc.get(defaultBlock);
+          List<CAstNode> defaultStuff = handleBlock(defaultChunks, fr);
+
+          node =
+              ast.makeNode(
+                  CAstNode.SWITCH,
+                  value,
+                  ast.makeNode(
+                      CAstNode.BLOCK_STMT, defaultStuff.toArray(new CAstNode[defaultStuff.size()])),
+                  switchCode.toArray(new CAstNode[switchCode.size()]));
         }
 
         @Override
@@ -1652,31 +1846,33 @@ public class ToSource {
       }
 
       protected Visitor makeVisitor(
-          SSAInstruction root, TypeInferenceContext c, Set<SSAInstruction> chunk) {
-        return new Visitor(root, c, chunk, children);
+          SSAInstruction root,
+          TypeInferenceContext c,
+          List<SSAInstruction> chunk2,
+          List<CAstNode> parentDecls) {
+        return new Visitor(root, c, chunk2, parentDecls, children);
       }
 
-      public ToCAst(Set<SSAInstruction> chunk, TypeInferenceContext c) {
-        this.chunk = chunk;
+      public ToCAst(List<SSAInstruction> insts, TypeInferenceContext c) {
+        this.chunk = insts;
         this.c = c;
       }
 
-      Pair<CAstNode, List<CAstNode>> processChunk() {
-        SSAInstruction root =
-            ReverseIterator.reverse(
-                    orderByInsts(chunk, ToSource::defSet, ToSource::useSet).iterator())
-                .next();
-        Visitor x = makeVisitor(root, c, chunk);
+      Pair<CAstNode, List<CAstNode>> processChunk(List<CAstNode> parentDecls) {
+        SSAInstruction root = chunk.iterator().next();
+        Visitor x = makeVisitor(root, c, chunk, parentDecls);
         return Pair.make(x.node, x.decls);
       }
     }
   }
 
   static class ToJavaVisitor extends CAstVisitor<TypeInferenceContext> {
+    private final IR ir;
     private final int indent;
     private final PrintWriter out;
 
-    private ToJavaVisitor(int indent, PrintWriter out) {
+    private ToJavaVisitor(int indent, IR ir, PrintWriter out) {
+      this.ir = ir;
       this.out = out;
       this.indent = indent;
     }
@@ -1685,6 +1881,36 @@ public class ToSource {
       for (int i = 0; i < indent; i++) {
         out.print("  ");
       }
+    }
+
+    @Override
+    protected boolean visitSwitch(
+        CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
+      indent();
+      out.print("switch (");
+      visit(n.getChild(0), c, visitor);
+      out.println(") {");
+
+      ToJavaVisitor cv = new ToJavaVisitor(indent + 1, ir, out);
+      for (int i = 2; i < n.getChildCount(); i++) {
+        CAstNode caseCAst = n.getChild(i);
+        cv.indent();
+        out.print("case ");
+        cv.visit(caseCAst.getChild(0), c, cv);
+        out.println(":");
+        cv.visit(caseCAst.getChild(1), c, cv);
+        cv.indent();
+        out.println("break;");
+      }
+
+      cv.indent();
+      out.println("default:");
+      cv.visit(n.getChild(1), c, cv);
+
+      indent();
+      out.println("}");
+
+      return true;
     }
 
     @Override
@@ -1707,7 +1933,7 @@ public class ToSource {
       try (ByteArrayOutputStream b = new ByteArrayOutputStream()) {
         try (PrintWriter bw = new PrintWriter(b)) {
 
-          ToJavaVisitor cv = new ToJavaVisitor(indent + 1, bw);
+          ToJavaVisitor cv = new ToJavaVisitor(indent + 1, ir, bw);
           for (CAstNode child : n.getChildren()) {
             if (child.getKind() != CAstNode.EMPTY) {
               cv.visit(child, c, cv);
@@ -1825,7 +2051,7 @@ public class ToSource {
     @Override
     protected boolean visitLoop(
         CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
-      ToJavaVisitor cv = new ToJavaVisitor(indent + 1, out);
+      ToJavaVisitor cv = new ToJavaVisitor(indent + 1, ir, out);
       indent();
       out.print("while (");
       cv.visit(n.getChild(0), c, cv);
@@ -1837,7 +2063,7 @@ public class ToSource {
     @Override
     protected boolean visitIfStmt(
         CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
-      ToJavaVisitor cv = new ToJavaVisitor(indent + 1, out);
+      ToJavaVisitor cv = new ToJavaVisitor(indent + 1, ir, out);
       indent();
       out.print("if (");
       cv.visit(n.getChild(0), c, cv);
@@ -1846,7 +2072,7 @@ public class ToSource {
       try (ByteArrayOutputStream b = new ByteArrayOutputStream()) {
         try (PrintWriter bw = new PrintWriter(b)) {
 
-          ToJavaVisitor cthen = new ToJavaVisitor(indent + 1, bw);
+          ToJavaVisitor cthen = new ToJavaVisitor(indent + 1, ir, bw);
           cthen.visit(n.getChild(1), c, cthen);
 
           bw.flush();
@@ -1864,9 +2090,24 @@ public class ToSource {
       }
 
       if (n.getChildCount() > 2) {
-        indent();
-        out.println("else");
-        cv.visit(n.getChild(2), c, cv);
+        try (ByteArrayOutputStream b = new ByteArrayOutputStream()) {
+          try (PrintWriter bw = new PrintWriter(b)) {
+
+            ToJavaVisitor celse = new ToJavaVisitor(indent + 1, ir, bw);
+            celse.visit(n.getChild(2), c, celse);
+
+            bw.flush();
+            String javaText = b.toString();
+
+            if (javaText.length() > 0) {
+              indent();
+              out.println("else");
+              out.println(javaText);
+            }
+          }
+        } catch (IOException e) {
+          assert false : e;
+        }
       }
       return true;
     }
@@ -1988,10 +2229,14 @@ public class ToSource {
     MutableIntSet done = IntSetUtil.make();
     List<CAstNode> inits = new LinkedList<>();
 
-    DefUse du = new DefUse(ir);
-    for (int n = 1; n <= ir.getSymbolTable().getMaxValueNumber(); n++) {
-      int vn = root.mergePhis.find(n);
-      if (du.getDef(vn) instanceof SSAPhiInstruction && !done.contains(vn)) {
+    System.err.println("looking at " + ast);
+
+    for (int vn = ir.getSymbolTable().getNumberOfParameters() + 1;
+        vn <= ir.getSymbolTable().getMaxValueNumber();
+        vn++) {
+      if (!CAstPattern.findAll(varUsePattern("var_" + vn), ast).isEmpty()
+          && CAstPattern.findAll(varDefPattern("var_" + vn), ast).isEmpty()) {
+        System.err.println("found " + vn);
         done.add(vn);
         inits.add(
             cast.makeNode(
@@ -2007,7 +2252,7 @@ public class ToSource {
     }
     ast = cast.makeNode(CAstNode.BLOCK_STMT, inits);
 
-    ToJavaVisitor toJava = new ToJavaVisitor(level, out);
+    ToJavaVisitor toJava = new ToJavaVisitor(level, ir, out);
     toJava.visit(ast, new TypeInferenceContext(types), toJava);
   }
 

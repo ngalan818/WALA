@@ -274,7 +274,7 @@ public final class BasicNaturalRelation implements IBinaryNaturalRelation, Seria
     }
     int ss0 = smallStore[0].get(x);
     if (ss0 == EMPTY_CODE) {
-      return null;
+      return EmptyIntSet.instance;
     } else {
       if (ss0 == DELEGATE_CODE) {
         return getDelegate(x);

@@ -830,7 +830,7 @@ public class PrimitivesTest extends WalaTestCase {
 
     R.remove(5, 1);
     x = R.getRelated(5);
-    Assert.assertTrue(x == null);
+    Assert.assertTrue(x.isEmpty());
 
     R.add(2, 1);
     R.add(2, 2);
@@ -840,10 +840,10 @@ public class PrimitivesTest extends WalaTestCase {
 
     R.removeAll(3);
     x = R.getRelated(3);
-    Assert.assertTrue(x == null);
+    Assert.assertTrue(x.isEmpty());
 
     x = R.getRelated(0);
-    Assert.assertTrue(x == null);
+    Assert.assertTrue(x.isEmpty());
 
     for (int i = 0; i < 100; i++) {
       R.add(1, i);

@@ -74,6 +74,9 @@ public class FakeExceptionTypeBinding implements ITypeBinding {
   public static final FakeExceptionTypeBinding outOfMemory =
       new FakeExceptionTypeBinding("Ljava/lang/OutOfMemoryError;");
 
+  public static final FakeExceptionTypeBinding runtimeException =
+      new FakeExceptionTypeBinding("Ljava/lang/RuntimeException;");
+
   private final String exceptionBinaryName;
 
   private FakeExceptionTypeBinding(String exceptionBinaryName) {

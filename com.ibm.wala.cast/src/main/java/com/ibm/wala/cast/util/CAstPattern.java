@@ -379,6 +379,10 @@ public class CAstPattern {
     }
   }
 
+  public static Collection<Segments> findAll(final CAstPattern p, final CAstNode e) {
+    return p.new Matcher().findAll(null, e);
+  }
+
   public static Collection<Segments> findAll(final CAstPattern p, final CAstEntity e) {
     return p.new Matcher()
         .findAll(
@@ -398,6 +402,13 @@ public class CAstPattern {
 
   public class Matcher extends CAstVisitor<Context> {
     private final Collection<Segments> result = HashSetFactory.make();
+
+    @Override
+    protected boolean visitAssignNodes(
+        CAstNode n, Context context, CAstNode v, CAstNode a, CAstVisitor<Context> visitor) {
+      visitor.visit(n, context, visitor);
+      return true;
+    }
 
     @Override
     public void leaveNode(CAstNode n, Context c, CAstVisitor<Context> visitor) {
