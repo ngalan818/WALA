@@ -5,18 +5,15 @@ import com.ibm.wala.cast.tree.impl.CAstImpl;
 import com.ibm.wala.cast.tree.rewrite.CAstRewriter.CopyKey;
 import com.ibm.wala.cast.tree.rewrite.CAstRewriter.RewriteContext;
 import com.ibm.wala.cast.tree.rewrite.CAstRewriterFactory;
-import com.ibm.wala.classLoader.ModuleEntry;
 import java.io.IOException;
 import java.util.LinkedList;
 import java.util.List;
 
 public class RewritingTranslatorToCAst implements TranslatorToCAst {
   private final List<CAstRewriterFactory<?, ?>> rewriters = new LinkedList<>();
-  protected final ModuleEntry M;
   private final TranslatorToCAst base;
 
-  public RewritingTranslatorToCAst(ModuleEntry m2, TranslatorToCAst base) {
-    this.M = m2;
+  public RewritingTranslatorToCAst(TranslatorToCAst base) {
     this.base = base;
   }
 

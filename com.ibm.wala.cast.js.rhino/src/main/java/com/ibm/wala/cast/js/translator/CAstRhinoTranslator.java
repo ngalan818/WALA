@@ -16,6 +16,6 @@ import com.ibm.wala.classLoader.ModuleEntry;
 
 public class CAstRhinoTranslator extends RewritingTranslatorToCAst {
   public CAstRhinoTranslator(ModuleEntry m, boolean replicateForDoLoops) {
-    super(m, new RhinoToAstTranslator(new CAstImpl(), m, m.getName(), replicateForDoLoops));
+    super(new RhinoToAstTranslator(new CAstImpl(), m, m.getName(), replicateForDoLoops));
   }
 }

@@ -90,7 +90,7 @@ public class ECJSourceModuleTranslator implements SourceModuleTranslator {
         String fullPath,
         boolean replicateForDoLoops,
         boolean dump) {
-      super(sourceLoader, astRoot, fullPath, replicateForDoLoops, dump);
+      super(sourceLoader.getReference(), astRoot, fullPath, replicateForDoLoops, dump);
     }
 
     @Override

@@ -23,6 +23,7 @@ import com.ibm.wala.types.TypeReference;
 import com.ibm.wala.util.collections.HashMapFactory;
 import com.ibm.wala.util.collections.HashSetFactory;
 import com.ibm.wala.util.collections.Pair;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileWriter;
 import java.io.IOException;
@@ -58,17 +59,18 @@ public class ToSourceFromJava extends ToSource {
 
       @Override
       protected ToCAst makeToCAst(List<SSAInstruction> c) {
-        return new ToCAst(c, new TypeInferenceContext(types)) {
+        return new ToCAst(c, new CodeGenerationContext(types, mergePhis)) {
 
           class JavaVisitor extends Visitor implements AstJavaInstructionVisitor {
 
             public JavaVisitor(
                 SSAInstruction root,
-                TypeInferenceContext c,
+                CodeGenerationContext c,
                 List<SSAInstruction> chunk,
                 List<CAstNode> parentDecls,
+                Map<String, Set<String>> packages,
                 Map<SSAInstruction, Map<ISSABasicBlock, RegionTreeNode>> children) {
-              super(root, c, chunk, parentDecls, children);
+              super(root, c, chunk, parentDecls, packages, children);
             }
 
             @Override
@@ -86,10 +88,11 @@ public class ToSourceFromJava extends ToSource {
           @Override
           protected Visitor makeVisitor(
               SSAInstruction root,
-              TypeInferenceContext c,
+              CodeGenerationContext c,
               List<SSAInstruction> chunk,
-              List<CAstNode> parentDecls) {
-            return new JavaVisitor(root, c, chunk, parentDecls, children);
+              List<CAstNode> parentDecls,
+              Map<String, Set<String>> packages) {
+            return new JavaVisitor(root, c, chunk, parentDecls, packages, children);
           }
         };
       }
@@ -112,56 +115,61 @@ public class ToSourceFromJava extends ToSource {
       if (cls instanceof AstClass) {
         String clsName = cls.getName().toString().substring(1);
         File f = new File(outDir, clsName + ".java");
-        try (PrintWriter out = new PrintWriter(new FileWriter(f))) {
-          out.println("import java.io.*;");
-          out.println("import java.util.*;");
-          out.println("public class " + clsName + " {");
-          for (IField fr : cls.getDeclaredStaticFields()) {
-            out.println(
-                "  static "
-                    + toSource(fr.getFieldTypeReference()).getName()
-                    + " "
-                    + fr.getName()
-                    + ";");
-          }
-          for (IField fr : cls.getDeclaredInstanceFields()) {
-            out.println(toSource(fr.getFieldTypeReference()).getName() + " " + fr.getName() + ";");
-          }
-          for (IMethod m : cls.getDeclaredMethods()) {
-            if (code.containsKey(m)) {
-              IR ir = code.get(m);
-              out.print("  public ");
-              if (m.isStatic()) {
-                out.print("static ");
+        Set<Pair<String, String>> seen = HashSetFactory.make();
+        try (PrintWriter all = new PrintWriter(new FileWriter(f))) {
+          try (ByteArrayOutputStream bs = new ByteArrayOutputStream()) {
+            try (PrintWriter out = new PrintWriter(bs)) {
+              out.println("public class " + clsName + " {");
+              for (IField fr : cls.getDeclaredStaticFields()) {
+                out.println(
+                    "  static "
+                        + toSource(fr.getFieldTypeReference()).getName()
+                        + " "
+                        + fr.getName()
+                        + ";");
               }
-              out.print(toSource(m.getReturnType()).getName() + " " + m.getName() + "(");
-              for (int i = 0; i < m.getReference().getNumberOfParameters(); i++) {
-                if (i != 0) {
-                  out.print(", ");
-                }
-                out.print(
-                    toSource(m.getReference().getParameterType(i)).getName() + " var_" + (i + 1));
+              for (IField fr : cls.getDeclaredInstanceFields()) {
+                out.println(
+                    toSource(fr.getFieldTypeReference()).getName() + " " + fr.getName() + ";");
               }
-              out.print(") ");
-              TypeReference[] exceptions = m.getDeclaredExceptions();
-              if (exceptions != null && exceptions.length > 0) {
-                boolean first = true;
-                for (TypeReference e : exceptions) {
-                  if (first) {
-                    first = false;
-                    out.print(" throws ");
-                  } else {
-                    out.print(", ");
+              for (IMethod m : cls.getDeclaredMethods()) {
+                if (code.containsKey(m) && !m.isSynthetic()) {
+                  for (TypeReference e : m.getDeclaredExceptions()) {
+                    Pair<String, String> key =
+                        Pair.make(
+                            e.getName().getPackage().toString().replace('/', '.'),
+                            e.getName().getClassName().toString());
+                    if (!seen.contains(key)) {
+                      seen.add(key);
+                      all.println("import " + key.fst + "." + key.snd + ";");
+                    }
                   }
-                  out.print(e.getName().getClassName());
+                  IR ir = code.get(m);
+                  AstJavaTypeInference types = new AstJavaTypeInference(ir, true);
+                  types.solve();
+                  toJava(
+                      ir,
+                      cg.getClassHierarchy(),
+                      types,
+                      out,
+                      (i) -> {
+                        Pair<String, String> key =
+                            Pair.make(
+                                (String) i.getChild(0).getValue(),
+                                (String) i.getChild(1).getValue());
+                        if (!seen.contains(key)) {
+                          seen.add(key);
+                          all.println("import " + key.fst + "." + key.snd + ";");
+                        }
+                      },
+                      1);
                 }
               }
-              AstJavaTypeInference types = new AstJavaTypeInference(ir, true);
-              types.solve();
-              toJava(ir, cg.getClassHierarchy(), types, out, 1);
+              out.println("}");
             }
+            all.print(new String(bs.toByteArray()));
           }
-          out.println("}");
+
           files.add(f);
         } catch (IOException | UnsupportedOperationException | InvalidClassFileException e) {
           assert false : e;

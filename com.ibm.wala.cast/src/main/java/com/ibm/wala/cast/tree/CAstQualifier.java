@@ -35,22 +35,23 @@ public class CAstQualifier {
   public static final CAstQualifier ANNOTATION = new CAstQualifier("@annotation");
   public static final CAstQualifier ENUM = new CAstQualifier("enum");
   public static final CAstQualifier MODULE = new CAstQualifier("module");
+  public static final CAstQualifier SYNTHETIC = new CAstQualifier("synthetic");
 
   static {
-    sQualifiers.add(ANNOTATION);
     sQualifiers.add(PUBLIC);
-    sQualifiers.add(PROTECTED);
     sQualifiers.add(PRIVATE);
+    sQualifiers.add(PROTECTED);
     sQualifiers.add(STATIC);
     sQualifiers.add(FINAL);
     sQualifiers.add(SYNCHRONIZED);
+    sQualifiers.add(VOLATILE);
     sQualifiers.add(TRANSIENT);
     sQualifiers.add(NATIVE);
     sQualifiers.add(INTERFACE);
     sQualifiers.add(ABSTRACT);
-    sQualifiers.add(VOLATILE);
     sQualifiers.add(STRICTFP);
-    sQualifiers.add(CONST);
+    sQualifiers.add(SYNTHETIC);
+    sQualifiers.add(ANNOTATION);
     sQualifiers.add(ENUM);
     sQualifiers.add(MODULE);
   }

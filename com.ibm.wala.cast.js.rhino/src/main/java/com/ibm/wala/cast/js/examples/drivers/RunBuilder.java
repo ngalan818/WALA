@@ -33,8 +33,7 @@ public class RunBuilder {
 
     class CAstRhinoNewTranslator extends RewritingTranslatorToCAst {
       public CAstRhinoNewTranslator(ModuleEntry m, boolean replicateForDoLoops) {
-        super(
-            m, new RhinoToAstTranslator(new CAstImpl(), m, m.getName(), replicateForDoLoops, true));
+        super(new RhinoToAstTranslator(new CAstImpl(), m, m.getName(), replicateForDoLoops, true));
       }
     }
 

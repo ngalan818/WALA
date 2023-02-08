@@ -30,6 +30,7 @@ import com.ibm.wala.cast.util.CAstPattern;
 import com.ibm.wala.cfg.ControlFlowGraph;
 import com.ibm.wala.cfg.Util;
 import com.ibm.wala.cfg.cdg.ControlDependenceGraph;
+import com.ibm.wala.classLoader.IMethod;
 import com.ibm.wala.core.util.strings.Atom;
 import com.ibm.wala.ipa.cfg.ExceptionPrunedCFG;
 import com.ibm.wala.ipa.cfg.PrunedCFG;
@@ -38,12 +39,14 @@ import com.ibm.wala.shrike.shrikeBT.IBinaryOpInstruction;
 import com.ibm.wala.shrike.shrikeBT.IBinaryOpInstruction.IOperator;
 import com.ibm.wala.shrike.shrikeBT.IConditionalBranchInstruction;
 import com.ibm.wala.shrike.shrikeBT.IUnaryOpInstruction;
+import com.ibm.wala.shrike.shrikeCT.InvalidClassFileException;
 import com.ibm.wala.ssa.DefUse;
 import com.ibm.wala.ssa.IR;
 import com.ibm.wala.ssa.ISSABasicBlock;
 import com.ibm.wala.ssa.SSAAbstractInvokeInstruction;
 import com.ibm.wala.ssa.SSAArrayLengthInstruction;
 import com.ibm.wala.ssa.SSAArrayLoadInstruction;
+import com.ibm.wala.ssa.SSAArrayStoreInstruction;
 import com.ibm.wala.ssa.SSABinaryOpInstruction;
 import com.ibm.wala.ssa.SSACheckCastInstruction;
 import com.ibm.wala.ssa.SSAComparisonInstruction;
@@ -91,6 +94,7 @@ import com.ibm.wala.util.intset.MutableIntSet;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.io.UTFDataFormatException;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -303,136 +307,144 @@ public class ToSource {
     return dfsStart;
   }
 
-  protected static class TypeInferenceContext implements CAstVisitor.Context {
+  protected static class CodeGenerationContext implements CAstVisitor.Context {
+    private final CAstEntity fakeTop =
+        new CAstEntity() {
+
+          @Override
+          public int getKind() {
+            // TODO Auto-generated method stub
+            return 0;
+          }
+
+          @Override
+          public String getName() {
+            // TODO Auto-generated method stub
+            return null;
+          }
+
+          @Override
+          public String getSignature() {
+            // TODO Auto-generated method stub
+            return null;
+          }
+
+          @Override
+          public String[] getArgumentNames() {
+            // TODO Auto-generated method stub
+            return null;
+          }
+
+          @Override
+          public CAstNode[] getArgumentDefaults() {
+            // TODO Auto-generated method stub
+            return null;
+          }
+
+          @Override
+          public int getArgumentCount() {
+            // TODO Auto-generated method stub
+            return 0;
+          }
+
+          @Override
+          public Map<CAstNode, Collection<CAstEntity>> getAllScopedEntities() {
+            // TODO Auto-generated method stub
+            return null;
+          }
+
+          @Override
+          public Iterator<CAstEntity> getScopedEntities(CAstNode construct) {
+            return EmptyIterator.instance();
+          }
+
+          @Override
+          public CAstNode getAST() {
+            // TODO Auto-generated method stub
+            return null;
+          }
+
+          @Override
+          public CAstControlFlowMap getControlFlow() {
+            // TODO Auto-generated method stub
+            return null;
+          }
+
+          @Override
+          public CAstSourcePositionMap getSourceMap() {
+            // TODO Auto-generated method stub
+            return null;
+          }
+
+          @Override
+          public Position getPosition() {
+            // TODO Auto-generated method stub
+            return null;
+          }
+
+          @Override
+          public Position getNamePosition() {
+            // TODO Auto-generated method stub
+            return null;
+          }
+
+          @Override
+          public Position getPosition(int arg) {
+            // TODO Auto-generated method stub
+            return null;
+          }
+
+          private final CAstNodeTypeMapRecorder types = new CAstNodeTypeMapRecorder();
+
+          @Override
+          public CAstNodeTypeMapRecorder getNodeTypeMap() {
+            return types;
+          }
+
+          @Override
+          public Collection<CAstQualifier> getQualifiers() {
+            // TODO Auto-generated method stub
+            return null;
+          }
+
+          @Override
+          public CAstType getType() {
+            // TODO Auto-generated method stub
+            return null;
+          }
+
+          @Override
+          public Collection<CAstAnnotation> getAnnotations() {
+            // TODO Auto-generated method stub
+            return null;
+          }
+        };
+
+    TypeInference getTypes() {
+      return types;
+    }
+
+    public IntegerUnionFind getMergePhis() {
+      return mergePhis;
+    }
 
     private final TypeInference types;
+    private final IntegerUnionFind mergePhis;
 
-    public TypeInferenceContext(TypeInference types) {
+    public CodeGenerationContext(TypeInference types, IntegerUnionFind mergePhis) {
       this.types = types;
+      this.mergePhis = mergePhis;
     }
 
     @Override
     public CAstEntity top() {
-      return new CAstEntity() {
-
-        @Override
-        public int getKind() {
-          // TODO Auto-generated method stub
-          return 0;
-        }
-
-        @Override
-        public String getName() {
-          // TODO Auto-generated method stub
-          return null;
-        }
-
-        @Override
-        public String getSignature() {
-          // TODO Auto-generated method stub
-          return null;
-        }
-
-        @Override
-        public String[] getArgumentNames() {
-          // TODO Auto-generated method stub
-          return null;
-        }
-
-        @Override
-        public CAstNode[] getArgumentDefaults() {
-          // TODO Auto-generated method stub
-          return null;
-        }
-
-        @Override
-        public int getArgumentCount() {
-          // TODO Auto-generated method stub
-          return 0;
-        }
-
-        @Override
-        public Map<CAstNode, Collection<CAstEntity>> getAllScopedEntities() {
-          // TODO Auto-generated method stub
-          return null;
-        }
-
-        @Override
-        public Iterator<CAstEntity> getScopedEntities(CAstNode construct) {
-          return EmptyIterator.instance();
-        }
-
-        @Override
-        public CAstNode getAST() {
-          // TODO Auto-generated method stub
-          return null;
-        }
-
-        @Override
-        public CAstControlFlowMap getControlFlow() {
-          // TODO Auto-generated method stub
-          return null;
-        }
-
-        @Override
-        public CAstSourcePositionMap getSourceMap() {
-          // TODO Auto-generated method stub
-          return null;
-        }
-
-        @Override
-        public Position getPosition() {
-          // TODO Auto-generated method stub
-          return null;
-        }
-
-        @Override
-        public Position getNamePosition() {
-          // TODO Auto-generated method stub
-          return null;
-        }
-
-        @Override
-        public Position getPosition(int arg) {
-          // TODO Auto-generated method stub
-          return null;
-        }
-
-        private final CAstNodeTypeMapRecorder types = new CAstNodeTypeMapRecorder();
-
-        @Override
-        public CAstNodeTypeMapRecorder getNodeTypeMap() {
-          return types;
-        }
-
-        @Override
-        public Collection<CAstQualifier> getQualifiers() {
-          // TODO Auto-generated method stub
-          return null;
-        }
-
-        @Override
-        public CAstType getType() {
-          // TODO Auto-generated method stub
-          return null;
-        }
-
-        @Override
-        public Collection<CAstAnnotation> getAnnotations() {
-          // TODO Auto-generated method stub
-          return null;
-        }
-      };
+      return fakeTop;
     }
 
     @Override
     public CAstSourcePositionMap getSourceMap() {
       // TODO Auto-generated method stub
       return null;
-    }
-
-    TypeInference getTypes() {
-      return types;
     }
   }
 
@@ -445,7 +457,7 @@ public class ToSource {
     private final Map<Pair<SSAInstruction, ISSABasicBlock>, List<List<SSAInstruction>>>
         regionChunks;
     private final MutableIntSet mergedValues;
-    private final IntegerUnionFind mergePhis;
+    protected final IntegerUnionFind mergePhis;
     private final SymbolTable ST;
     private final DefUse du;
     private final PrunedCFG<SSAInstruction, ISSABasicBlock> cfg;
@@ -518,6 +530,7 @@ public class ToSource {
       this.loopControls = parent.loopControls;
       this.livenessConflicts = parent.livenessConflicts;
       this.cdg = parent.cdg;
+      this.packages = parent.packages;
       initChildren();
       System.err.println("added children for " + r + "," + l + ": " + children);
     }
@@ -556,6 +569,7 @@ public class ToSource {
       this.types = types;
       du = new DefUse(ir);
       cfg = ExceptionPrunedCFG.makeUncaught(ir.getControlFlowGraph());
+      packages = HashMapFactory.make();
 
       livenessConflicts = new BasicNaturalRelation();
       LiveAnalysis.Result liveness = LiveAnalysis.perform(ir);
@@ -1082,10 +1096,9 @@ public class ToSource {
     }
 
     /*
-    private boolean phiChunk(Set<SSAInstruction> insts) {
-      return insts.size() == 1 && insts.iterator().next() instanceof SSAPhiInstruction;
-    }
-    */
+     * private boolean phiChunk(Set<SSAInstruction> insts) { return insts.size()
+     * == 1 && insts.iterator().next() instanceof SSAPhiInstruction; }
+     */
 
     private boolean gotoChunk(List<SSAInstruction> insts) {
       return insts.size() == 1 && insts.iterator().next() instanceof SSAGotoInstruction;
@@ -1097,20 +1110,12 @@ public class ToSource {
     }
 
     /*
-    boolean controlOrderedChunks(
-        List<SSAInstruction> ls, List<SSAInstruction> rs, List<SSAInstruction> insts) {
-      for (SSAInstruction l : ls) {
-        if (!deemedFunctional(l, insts, cha)) {
-          for (SSAInstruction r : rs) {
-            if (!deemedFunctional(r, insts, cha)) {
-              return l.iIndex() < r.iIndex();
-            }
-          }
-        }
-      }
-      return false;
-    }
-    */
+     * boolean controlOrderedChunks( List<SSAInstruction> ls,
+     * List<SSAInstruction> rs, List<SSAInstruction> insts) { for
+     * (SSAInstruction l : ls) { if (!deemedFunctional(l, insts, cha)) { for
+     * (SSAInstruction r : rs) { if (!deemedFunctional(r, insts, cha)) { return
+     * l.iIndex() < r.iIndex(); } } } } return false; }
+     */
 
     public CAstNode toCAst() {
       CAst ast = new CAstImpl();
@@ -1120,7 +1125,8 @@ public class ToSource {
       chunks.forEach(
           chunkInsts -> {
             if (!gotoChunk(chunkInsts)) {
-              Pair<CAstNode, List<CAstNode>> stuff = makeToCAst(chunkInsts).processChunk(decls);
+              Pair<CAstNode, List<CAstNode>> stuff =
+                  makeToCAst(chunkInsts).processChunk(decls, packages);
               elts.add(stuff.fst);
               decls.addAll(stuff.snd);
             }
@@ -1129,7 +1135,7 @@ public class ToSource {
           .filter(this::gotoChunk)
           .forEach(
               c -> {
-                Pair<CAstNode, List<CAstNode>> stuff = makeToCAst(c).processChunk(decls);
+                Pair<CAstNode, List<CAstNode>> stuff = makeToCAst(c).processChunk(decls, packages);
                 elts.add(stuff.fst);
                 decls.addAll(stuff.snd);
               });
@@ -1138,7 +1144,7 @@ public class ToSource {
     }
 
     protected ToCAst makeToCAst(List<SSAInstruction> insts) {
-      return new ToCAst(insts, new TypeInferenceContext(types));
+      return new ToCAst(insts, new CodeGenerationContext(types, mergePhis));
     }
 
     private void toString(StringBuffer text, int level) {
@@ -1189,9 +1195,11 @@ public class ToSource {
 
     private final CAst ast = new CAstImpl();
 
+    private final Map<String, Set<String>> packages;
+
     protected class ToCAst {
       private final List<SSAInstruction> chunk;
-      private final TypeInferenceContext c;
+      private final CodeGenerationContext c;
 
       protected class Visitor implements AstPreInstructionVisitor {
         private CAstNode node = ast.makeNode(CAstNode.EMPTY);
@@ -1200,45 +1208,50 @@ public class ToSource {
         private SSAInstruction root;
         protected final List<CAstNode> parentDecls;
         private final List<CAstNode> decls = new LinkedList<>();
+        private final Map<String, Set<String>> packages;
 
         public Visitor(
             SSAInstruction root,
-            TypeInferenceContext c,
+            CodeGenerationContext c,
             List<SSAInstruction> chunk2,
             List<CAstNode> parentDecls,
+            Map<String, Set<String>> parentPackages,
             Map<SSAInstruction, Map<ISSABasicBlock, RegionTreeNode>> children) {
           this.root = root;
           this.chunk = chunk2;
           this.children = children;
           this.parentDecls = parentDecls;
+          this.packages = parentPackages;
           root.visit(this);
           if (root.hasDef()) {
-            int def = root.getDef();
-            if (mergedValues.contains(mergePhis.find(def))
-                || du.getDef(def) instanceof SSAPhiInstruction) {
-              CAstNode val = node;
-              node =
-                  ast.makeNode(
-                      CAstNode.EXPR_STMT,
-                      ast.makeNode(
-                          CAstNode.ASSIGN,
-                          ast.makeNode(
-                              CAstNode.VAR, ast.makeConstant("var_" + mergePhis.find(def))),
-                          val));
-            } else {
-              CAstNode val = node;
-              CAstType type;
-              try {
-                type = toSource(c.getTypes().getType(def).getTypeReference());
-              } catch (IndexOutOfBoundsException e) {
-                type = toSource(TypeReference.Int);
+            if (node.getKind() != CAstNode.EMPTY) {
+              int def = root.getDef();
+              if (mergedValues.contains(mergePhis.find(def))
+                  || du.getDef(def) instanceof SSAPhiInstruction) {
+                CAstNode val = node;
+                node =
+                    ast.makeNode(
+                        CAstNode.EXPR_STMT,
+                        ast.makeNode(
+                            CAstNode.ASSIGN,
+                            ast.makeNode(
+                                CAstNode.VAR, ast.makeConstant("var_" + mergePhis.find(def))),
+                            val));
+              } else {
+                CAstNode val = node;
+                CAstType type;
+                try {
+                  type = toSource(c.getTypes().getType(def).getTypeReference());
+                } catch (IndexOutOfBoundsException e) {
+                  type = toSource(TypeReference.Int);
+                }
+                node =
+                    ast.makeNode(
+                        CAstNode.DECL_STMT,
+                        ast.makeNode(CAstNode.VAR, ast.makeConstant("var_" + mergePhis.find(def))),
+                        ast.makeConstant(type),
+                        val);
               }
-              node =
-                  ast.makeNode(
-                      CAstNode.DECL_STMT,
-                      ast.makeNode(CAstNode.VAR, ast.makeConstant("var_" + mergePhis.find(def))),
-                      ast.makeConstant(type),
-                      val);
             }
           }
         }
@@ -1259,12 +1272,13 @@ public class ToSource {
             return ast.makeConstant(ST.getConstantValue(vn));
           } else if (ST.getNumberOfParameters() >= vn) {
             if (cfg.getMethod().isStatic()) {
-              return ast.makeNode(CAstNode.VAR, ast.makeConstant("var_" + vn));
+              return ast.makeNode(CAstNode.VAR, ast.makeConstant("var_" + mergePhis.find(vn)));
             } else {
               if (vn == 1) {
                 return ast.makeNode(CAstNode.THIS);
               } else {
-                return ast.makeNode(CAstNode.VAR, ast.makeConstant("var_" + (vn - 1)));
+                return ast.makeNode(
+                    CAstNode.VAR, ast.makeConstant("var_" + mergePhis.find(vn - 1)));
               }
             }
           } else {
@@ -1303,7 +1317,7 @@ public class ToSource {
         public void visitGoto(SSAGotoInstruction inst) {
           ISSABasicBlock bb = cfg.getBlockForInstruction(inst.iIndex());
           if (loopHeaders.containsAll(cfg.getNormalSuccessors(bb))) {
-            //          node = ast.makeNode(CAstNode.CONTINUE);
+            // node = ast.makeNode(CAstNode.CONTINUE);
           } else if (loopExits.containsAll(cfg.getNormalSuccessors(bb))) {
             node = ast.makeNode(CAstNode.BLOCK_STMT, ast.makeNode(CAstNode.BREAK));
           } else {
@@ -1317,6 +1331,19 @@ public class ToSource {
           CAstNode index = visit(instruction.getIndex());
           CAstNode elt = ast.makeConstant(toSource(instruction.getElementType()));
           node = ast.makeNode(CAstNode.ARRAY_REF, array, elt, index);
+        }
+
+        @Override
+        public void visitArrayStore(SSAArrayStoreInstruction instruction) {
+          CAstNode array = visit(instruction.getArrayRef());
+          CAstNode index = visit(instruction.getIndex());
+          CAstNode value = visit(instruction.getValue());
+          CAstNode elt = ast.makeConstant(toSource(instruction.getElementType()));
+          node =
+              ast.makeNode(
+                  CAstNode.EXPR_STMT,
+                  ast.makeNode(
+                      CAstNode.ASSIGN, ast.makeNode(CAstNode.ARRAY_REF, array, elt, index), value));
         }
 
         @Override
@@ -1468,7 +1495,7 @@ public class ToSource {
             assert inst instanceof AssignInstruction;
             Visitor v =
                 makeToCAst(insts)
-                    .makeVisitor(inst, c, Collections.singletonList(inst), parentDecls);
+                    .makeVisitor(inst, c, Collections.singletonList(inst), parentDecls, packages);
             lp.add(
                 ast.makeNode(
                     CAstNode.EXPR_STMT,
@@ -1648,7 +1675,7 @@ public class ToSource {
           } else {
             return streamify(loopChunks)
                 .filter(assignFilter)
-                .map(c -> lr.makeToCAst(c).processChunk(parentDecls))
+                .map(c -> lr.makeToCAst(c).processChunk(parentDecls, packages))
                 .collect(Collectors.toList());
           }
         }
@@ -1757,6 +1784,11 @@ public class ToSource {
 
           args[0] = ast.makeConstant(inst.getDeclaredTarget());
 
+          if (inst.getCallSite().isStatic() || inst.getDeclaredTarget().isInit()) {
+            recordPackage(inst.getDeclaredTarget().getDeclaringClass());
+            System.err.println("looking at type " + inst.getDeclaredTarget().getDeclaringClass());
+          }
+
           args[1] = ast.makeConstant(inst.getCallSite().isStatic());
 
           if (Void.equals(inst.getDeclaredResultType())) {
@@ -1773,12 +1805,27 @@ public class ToSource {
 
         @Override
         public void visitNew(SSANewInstruction instruction) {
-          if (instruction.getConcreteType().isArrayType()) {
-            node =
-                ast.makeNode(
-                    CAstNode.NEW,
-                    ast.makeConstant(instruction.getConcreteType()),
-                    visit(instruction.getUse(0)));
+          TypeReference newType = instruction.getConcreteType();
+          if (newType.isArrayType()) {
+            CAstNode dims[] = new CAstNode[instruction.getNumberOfUses()];
+
+            for (int i = 0; i < instruction.getNumberOfUses(); i++) {
+              dims[i] = visit(instruction.getUse(i));
+            }
+
+            recordPackage(newType);
+
+            node = ast.makeNode(CAstNode.NEW, ast.makeConstant(newType), dims);
+          }
+        }
+
+        private void recordPackage(TypeReference newType) {
+          String pkg = toPackage(newType);
+          if (pkg != null) {
+            if (!packages.containsKey(pkg)) {
+              packages.put(pkg, HashSetFactory.make());
+            }
+            packages.get(pkg).add(toSource(newType).getName());
           }
         }
 
@@ -1821,7 +1868,7 @@ public class ToSource {
 
         @Override
         public void visitPhi(SSAPhiInstruction instruction) {
-          //                        assert false;
+          // assert false;
         }
 
         @Override
@@ -1847,26 +1894,28 @@ public class ToSource {
 
       protected Visitor makeVisitor(
           SSAInstruction root,
-          TypeInferenceContext c,
+          CodeGenerationContext c,
           List<SSAInstruction> chunk2,
-          List<CAstNode> parentDecls) {
-        return new Visitor(root, c, chunk2, parentDecls, children);
+          List<CAstNode> parentDecls,
+          Map<String, Set<String>> packages) {
+        return new Visitor(root, c, chunk2, parentDecls, packages, children);
       }
 
-      public ToCAst(List<SSAInstruction> insts, TypeInferenceContext c) {
+      public ToCAst(List<SSAInstruction> insts, CodeGenerationContext c) {
         this.chunk = insts;
         this.c = c;
       }
 
-      Pair<CAstNode, List<CAstNode>> processChunk(List<CAstNode> parentDecls) {
+      Pair<CAstNode, List<CAstNode>> processChunk(
+          List<CAstNode> parentDecls, Map<String, Set<String>> packages) {
         SSAInstruction root = chunk.iterator().next();
-        Visitor x = makeVisitor(root, c, chunk, parentDecls);
+        Visitor x = makeVisitor(root, c, chunk, parentDecls, packages);
         return Pair.make(x.node, x.decls);
       }
     }
   }
 
-  static class ToJavaVisitor extends CAstVisitor<TypeInferenceContext> {
+  static class ToJavaVisitor extends CAstVisitor<CodeGenerationContext> {
     private final IR ir;
     private final int indent;
     private final PrintWriter out;
@@ -1884,8 +1933,20 @@ public class ToSource {
     }
 
     @Override
+    protected boolean visitInclude(
+        CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
+      out.println(
+          "import "
+              + ((String) n.getChild(0).getValue()).replace('/', '.')
+              + "."
+              + n.getChild(1).getValue()
+              + ";");
+      return true;
+    }
+
+    @Override
     protected boolean visitSwitch(
-        CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
+        CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
       indent();
       out.print("switch (");
       visit(n.getChild(0), c, visitor);
@@ -1915,7 +1976,7 @@ public class ToSource {
 
     @Override
     protected boolean visitDeclStmt(
-        CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
+        CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
       indent();
       out.print(((CAstType) n.getChild(1).getValue()).getName() + " ");
       visit(n.getChild(0), c, visitor);
@@ -1929,7 +1990,7 @@ public class ToSource {
 
     @Override
     protected boolean visitBlockStmt(
-        CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
+        CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
       try (ByteArrayOutputStream b = new ByteArrayOutputStream()) {
         try (PrintWriter bw = new PrintWriter(b)) {
 
@@ -1959,7 +2020,7 @@ public class ToSource {
 
     @Override
     protected boolean visitConstant(
-        CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
+        CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
       Object v = n.getValue();
       if (v instanceof FieldReference) {
         out.print(((FieldReference) v).getName().toString());
@@ -1975,14 +2036,14 @@ public class ToSource {
 
     @Override
     protected boolean visitVar(
-        CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
+        CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
       out.print(n.getChild(0).getValue());
       return true;
     }
 
     @Override
     public boolean visitAssign(
-        CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
+        CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
       visit(n.getChild(0), c, visitor);
       out.print(" = ");
       visit(n.getChild(1), c, visitor);
@@ -1991,7 +2052,7 @@ public class ToSource {
 
     @Override
     protected boolean visitCall(
-        CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
+        CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
       MethodReference target = (MethodReference) n.getChild(0).getValue();
       boolean isStatic = ((Boolean) n.getChild(1).getValue()).booleanValue();
       if ("<init>".equals(target.getName().toString())) {
@@ -2016,8 +2077,11 @@ public class ToSource {
           visit(n.getChild(i), c, visitor);
         }
       } else {
-        visit(n.getChild(2), c, this);
-        out.print("." + target.getName() + "(");
+        if (n.getChild(2).getKind() != CAstNode.THIS) {
+          visit(n.getChild(2), c, this);
+          out.print(".");
+        }
+        out.print(target.getName() + "(");
         for (int i = 3; i < n.getChildCount(); i++) {
           if (i != 3) {
             out.print(", ");
@@ -2031,7 +2095,7 @@ public class ToSource {
 
     @Override
     protected boolean visitBlockExpr(
-        CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
+        CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
       assert n.getChildCount() == 1;
       out.print("(");
       visit(n.getChild(0), c, visitor);
@@ -2041,7 +2105,7 @@ public class ToSource {
 
     @Override
     protected boolean visitExprStmt(
-        CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
+        CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
       indent();
       visit(n.getChild(0), c, visitor);
       out.println(";");
@@ -2050,7 +2114,7 @@ public class ToSource {
 
     @Override
     protected boolean visitLoop(
-        CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
+        CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
       ToJavaVisitor cv = new ToJavaVisitor(indent + 1, ir, out);
       indent();
       out.print("while (");
@@ -2062,7 +2126,7 @@ public class ToSource {
 
     @Override
     protected boolean visitIfStmt(
-        CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
+        CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
       ToJavaVisitor cv = new ToJavaVisitor(indent + 1, ir, out);
       indent();
       out.print("if (");
@@ -2114,13 +2178,13 @@ public class ToSource {
 
     @Override
     public boolean visitNode(
-        CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
+        CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
       return true;
     }
 
     @Override
     protected boolean doVisit(
-        CAstNode n, TypeInferenceContext context, CAstVisitor<TypeInferenceContext> visitor) {
+        CAstNode n, CodeGenerationContext context, CAstVisitor<CodeGenerationContext> visitor) {
       switch (n.getKind()) {
         case CAstNode.BREAK:
           {
@@ -2136,7 +2200,7 @@ public class ToSource {
 
     @Override
     protected boolean visitReturn(
-        CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
+        CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
       indent();
       out.print("return");
       if (n.getChildCount() > 0) {
@@ -2149,7 +2213,7 @@ public class ToSource {
 
     @Override
     protected boolean visitBinaryExpr(
-        CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
+        CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
       out.print("(");
       visit(n.getChild(1), c, this);
       out.print(" " + n.getChild(0).getValue() + " ");
@@ -2160,7 +2224,7 @@ public class ToSource {
 
     @Override
     protected boolean visitUnaryExpr(
-        CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
+        CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
       out.print(n.getChild(0).getValue() + " ");
       visit(n.getChild(1), c, this);
       return true;
@@ -2168,7 +2232,7 @@ public class ToSource {
 
     @Override
     protected boolean visitCast(
-        CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
+        CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
       out.print("(" + ((CAstType) n.getChild(0).getValue()).getName() + ") ");
       visit(n.getChild(1), c, visitor);
       return true;
@@ -2176,7 +2240,7 @@ public class ToSource {
 
     @Override
     protected boolean visitArrayRef(
-        CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
+        CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
       visit(n.getChild(0), c, visitor);
       out.print("[");
       visit(n.getChild(2), c, visitor);
@@ -2186,7 +2250,7 @@ public class ToSource {
 
     @Override
     protected boolean visitObjectRef(
-        CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
+        CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
       visit(n.getChild(0), c, visitor);
       out.print(".");
       if (n.getChild(1).getValue() instanceof String) {
@@ -2199,13 +2263,16 @@ public class ToSource {
 
     @Override
     protected boolean visitNew(
-        CAstNode n, TypeInferenceContext c, CAstVisitor<TypeInferenceContext> visitor) {
+        CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
       TypeReference type = (TypeReference) n.getChild(0).getValue();
       if (type.isArrayType()) {
         TypeReference eltType = type.getInnermostElementType();
-        out.print("new " + toSource(eltType) + "[");
-        visit(n.getChild(1), c, visitor);
-        out.print("]");
+        out.print("new " + toSource(eltType));
+        for (int i = 1; i < n.getChildCount(); i++) {
+          out.print("[");
+          visit(n.getChild(i), c, visitor);
+          out.print("]");
+        }
         return true;
       } else {
         return super.visitNew(n, c, visitor);
@@ -2213,7 +2280,13 @@ public class ToSource {
     }
   }
 
-  public void toJava(IR ir, IClassHierarchy cha, TypeInference types, PrintWriter out, int level) {
+  public void toJava(
+      IR ir,
+      IClassHierarchy cha,
+      TypeInference types,
+      PrintWriter out,
+      Consumer<CAstNode> includes,
+      int level) {
     PrunedCFG<SSAInstruction, ISSABasicBlock> cfg =
         ExceptionPrunedCFG.makeUncaught(ir.getControlFlowGraph());
     System.err.println(ir);
@@ -2225,8 +2298,66 @@ public class ToSource {
     CAstNode ast = root.toCAst();
     System.err.println(ast);
 
-    CAst cast = new CAstImpl();
     MutableIntSet done = IntSetUtil.make();
+
+    IMethod m = ir.getMethod();
+    if (m.isClinit()) {
+      out.println("  static");
+
+    } else {
+      out.print("  public ");
+      if (m.isStatic()) {
+        out.print("static ");
+      }
+      if (m.isInit()) {
+        out.println(m.getDeclaringClass().getName().getClassName() + "(");
+      } else {
+        out.print(toSource(m.getReturnType()).getName() + " " + m.getName() + "(");
+      }
+      for (int i = 0; i < m.getReference().getNumberOfParameters(); i++) {
+        done.add(root.mergePhis.find(i + 1));
+        if (i != 0) {
+          out.print(", ");
+        }
+        out.print(
+            toSource(m.getReference().getParameterType(i)).getName()
+                + " var_"
+                + root.mergePhis.find(i + 1));
+      }
+      out.print(") ");
+      try {
+        TypeReference[] exceptions = m.getDeclaredExceptions();
+        if (exceptions != null && exceptions.length > 0) {
+          boolean first = true;
+          for (TypeReference e : exceptions) {
+            if (first) {
+              first = false;
+              out.print(" throws ");
+            } else {
+              out.print(", ");
+            }
+            out.print(e.getName().getClassName());
+          }
+        }
+      } catch (InvalidClassFileException e) {
+        assert false : e;
+      }
+    }
+
+    CAst cast = new CAstImpl();
+
+    root.packages.forEach(
+        (p, cs) -> {
+          cs.forEach(
+              c -> {
+                includes.accept(
+                    cast.makeNode(
+                        CAstNode.INCLUDE,
+                        cast.makeConstant(p.replace('/', '.')),
+                        cast.makeConstant(c)));
+              });
+        });
+
     List<CAstNode> inits = new LinkedList<>();
 
     System.err.println("looking at " + ast);
@@ -2234,7 +2365,8 @@ public class ToSource {
     for (int vn = ir.getSymbolTable().getNumberOfParameters() + 1;
         vn <= ir.getSymbolTable().getMaxValueNumber();
         vn++) {
-      if (!CAstPattern.findAll(varUsePattern("var_" + vn), ast).isEmpty()
+      if (!done.contains(vn)
+          && !CAstPattern.findAll(varUsePattern("var_" + vn), ast).isEmpty()
           && CAstPattern.findAll(varDefPattern("var_" + vn), ast).isEmpty()) {
         System.err.println("found " + vn);
         done.add(vn);
@@ -2247,13 +2379,14 @@ public class ToSource {
     }
 
     assert ast.getKind() == CAstNode.BLOCK_STMT;
+
     for (CAstNode c : ast.getChildren()) {
       inits.add(c);
     }
     ast = cast.makeNode(CAstNode.BLOCK_STMT, inits);
 
     ToJavaVisitor toJava = new ToJavaVisitor(level, ir, out);
-    toJava.visit(ast, new TypeInferenceContext(types), toJava);
+    toJava.visit(ast, new CodeGenerationContext(types, root.mergePhis), toJava);
   }
 
   protected RegionTreeNode makeTreeNode(
@@ -2264,6 +2397,25 @@ public class ToSource {
     RegionTreeNode root =
         new RegionTreeNode(ir, cha, types, cfg.getNode(1).getLastInstruction(), cfg.getNode(2));
     return root;
+  }
+
+  protected static String toPackage(TypeReference type) {
+    if (type.isArrayType()) {
+      return toPackage(type.getArrayElementType());
+    } else if (type.isReferenceType()) {
+      try {
+        if (type.getName().getPackage() != null) {
+          return type.getName().getPackage().toUnicodeString();
+        } else {
+          return null;
+        }
+      } catch (UTFDataFormatException e) {
+        assert false : e;
+        return type.getName().getPackage().toString();
+      }
+    } else {
+      return null;
+    }
   }
 
   protected static CAstType toSource(TypeReference type) {

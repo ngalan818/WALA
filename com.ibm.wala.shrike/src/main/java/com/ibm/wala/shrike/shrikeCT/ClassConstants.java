@@ -75,6 +75,14 @@ public interface ClassConstants {
 
   public static final short ACC_STRICT = 0x800;
 
+  public static final short ACC_SYNTHETIC = 0x1000;
+
+  public static final char ACC_ANNOTATION = 0x2000;
+
+  public static final char ACC_ENUM = 0x4000;
+
+  public static final char ACC_MODULE = 0x8000;
+
   public static final byte REF_getField = 1;
 
   public static final byte REF_getStatic = 2;

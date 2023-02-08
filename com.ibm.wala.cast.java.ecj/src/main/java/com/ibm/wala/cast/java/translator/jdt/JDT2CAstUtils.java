@@ -40,6 +40,7 @@ package com.ibm.wala.cast.java.translator.jdt;
 import com.ibm.wala.cast.tree.CAstQualifier;
 import com.ibm.wala.cast.tree.CAstSymbol;
 import com.ibm.wala.cast.tree.impl.CAstOperator;
+import com.ibm.wala.shrike.shrikeBT.Constants;
 import com.ibm.wala.util.debug.Assertions;
 import java.util.Collection;
 import java.util.HashMap;
@@ -78,6 +79,7 @@ public class JDT2CAstUtils {
     if ((modifiers & Modifier.SYNCHRONIZED) != 0) quals.add(CAstQualifier.SYNCHRONIZED);
     if ((modifiers & Modifier.TRANSIENT) != 0) quals.add(CAstQualifier.TRANSIENT);
     if ((modifiers & Modifier.VOLATILE) != 0) quals.add(CAstQualifier.VOLATILE);
+    if ((modifiers & Constants.ACC_SYNTHETIC) != 0) quals.add(CAstQualifier.SYNTHETIC);
 
     return quals;
   }

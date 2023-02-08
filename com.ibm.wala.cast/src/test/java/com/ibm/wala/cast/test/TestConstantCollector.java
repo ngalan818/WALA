@@ -149,13 +149,13 @@ public class TestConstantCollector {
   public void testSegmentsRoot1() {
     Collection<Segments> x =
         CAstPattern.findAll(AstConstantCollector.simpleValuePattern, fakeEntity(root1));
-    assert x.size() == 1;
+    assert x.size() == 1 : x.size();
   }
 
   @Test
   public void testRoot1() {
     Map<String, Object> x = AstConstantCollector.collectConstants(fakeEntity(root1));
-    assert x.size() == 1;
+    assert x.size() == 1 : x.size();
   }
 
   private final CAstNode root2 =
@@ -174,7 +174,7 @@ public class TestConstantCollector {
   public void testSegmentsRoot2() {
     Collection<Segments> x =
         CAstPattern.findAll(AstConstantCollector.simpleValuePattern, fakeEntity(root2));
-    assert x.size() == 2;
+    assert x.size() == 2 : x.size();
   }
 
   private final CAstNode root3 =
@@ -196,9 +196,11 @@ public class TestConstantCollector {
   @Test
   public void testRoot3() {
     CAstEntity ce = fakeEntity(root3);
+    System.err.println("root3: orig: " + ce.getAST());
     CAstEntity nce = new AstConstantFolder().fold(ce);
+    System.err.println("root3: folded: " + nce.getAST());
     Collection<Segments> matches = CAstPattern.findAll(toCodePattern3, nce);
-    assert matches.size() == 1;
+    assert matches.size() == 1 : matches.size();
   }
 
   private final CAstNode root4 =

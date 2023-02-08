@@ -287,7 +287,7 @@ public abstract class AstMethod implements IMethod {
 
   @Override
   public boolean isSynthetic() {
-    return false;
+    return qualifiers.contains(CAstQualifier.SYNTHETIC);
   }
 
   @Override

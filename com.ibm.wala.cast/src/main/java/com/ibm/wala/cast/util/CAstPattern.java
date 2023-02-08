@@ -22,8 +22,10 @@ import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.TreeMap;
 import java.util.regex.Pattern;
 
@@ -74,8 +76,8 @@ public class CAstPattern {
         if (o instanceof CAstNode) {
           return Collections.singletonList((CAstNode) o);
         } else {
-          assert o instanceof List;
-          return (List<CAstNode>) o;
+          assert o instanceof Collection;
+          return new LinkedList<>((Collection<CAstNode>) o);
         }
       }
     }
@@ -87,7 +89,7 @@ public class CAstPattern {
           add(name, (CAstNode) e.getValue());
         } else {
           @SuppressWarnings("unchecked")
-          final List<CAstNode> nodes = (List<CAstNode>) e.getValue();
+          final Collection<CAstNode> nodes = (Collection<CAstNode>) e.getValue();
           for (CAstNode v : nodes) {
             add(name, v);
           }
@@ -99,11 +101,11 @@ public class CAstPattern {
     private void add(String name, CAstNode result) {
       if (containsKey(name)) {
         Object o = get(name);
-        if (o instanceof List) {
-          ((List<CAstNode>) o).add(result);
+        if (o instanceof Collection) {
+          ((Collection<CAstNode>) o).add(result);
         } else {
           assert o instanceof CAstNode;
-          List<Object> x = new ArrayList<>();
+          Set<Object> x = HashSetFactory.make();
           x.add(o);
           x.add(result);
           put(name, x);
@@ -406,8 +408,8 @@ public class CAstPattern {
     @Override
     protected boolean visitAssignNodes(
         CAstNode n, Context context, CAstNode v, CAstNode a, CAstVisitor<Context> visitor) {
-      visitor.visit(n, context, visitor);
-      return true;
+      n.getChildren().forEach(c -> visitor.visit(c, context, visitor));
+      return super.visitAssignNodes(n, context, v, a, visitor);
     }
 
     @Override
@@ -425,16 +427,11 @@ public class CAstPattern {
 
     @Override
     protected boolean doVisit(CAstNode n, Context context, CAstVisitor<Context> visitor) {
+      n.getChildren().forEach(c -> visitor.visit(c, context, visitor));
       Segments s = match(CAstPattern.this, n);
       if (s != null) {
         result.add(s);
       }
-      return true;
-    }
-
-    @Override
-    protected boolean doVisitAssignNodes(
-        CAstNode n, Context context, CAstNode v, CAstNode a, CAstVisitor<Context> visitor) {
       return true;
     }
   }

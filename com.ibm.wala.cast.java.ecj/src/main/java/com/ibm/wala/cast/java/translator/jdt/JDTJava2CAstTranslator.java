@@ -37,40 +37,6 @@
  */
 package com.ibm.wala.cast.java.translator.jdt;
 
-import com.ibm.wala.analysis.typeInference.JavaPrimitiveType;
-import com.ibm.wala.cast.ir.translator.AstTranslator.InternalCAstSymbol;
-import com.ibm.wala.cast.ir.translator.TranslatorToCAst;
-import com.ibm.wala.cast.ir.translator.TranslatorToCAst.DoLoopTranslator;
-import com.ibm.wala.cast.java.loader.JavaSourceLoaderImpl;
-import com.ibm.wala.cast.java.loader.Util;
-import com.ibm.wala.cast.java.translator.JavaProcedureEntity;
-import com.ibm.wala.cast.tree.CAst;
-import com.ibm.wala.cast.tree.CAstAnnotation;
-import com.ibm.wala.cast.tree.CAstControlFlowMap;
-import com.ibm.wala.cast.tree.CAstEntity;
-import com.ibm.wala.cast.tree.CAstNode;
-import com.ibm.wala.cast.tree.CAstNodeTypeMap;
-import com.ibm.wala.cast.tree.CAstQualifier;
-import com.ibm.wala.cast.tree.CAstSourcePositionMap;
-import com.ibm.wala.cast.tree.CAstSourcePositionMap.Position;
-import com.ibm.wala.cast.tree.CAstType;
-import com.ibm.wala.cast.tree.impl.CAstControlFlowRecorder;
-import com.ibm.wala.cast.tree.impl.CAstImpl;
-import com.ibm.wala.cast.tree.impl.CAstNodeTypeMapRecorder;
-import com.ibm.wala.cast.tree.impl.CAstOperator;
-import com.ibm.wala.cast.tree.impl.CAstSourcePositionRecorder;
-import com.ibm.wala.cast.tree.impl.CAstSymbolImpl;
-import com.ibm.wala.cast.util.CAstPrinter;
-import com.ibm.wala.classLoader.CallSiteReference;
-import com.ibm.wala.shrike.shrikeBT.IInvokeInstruction;
-import com.ibm.wala.types.FieldReference;
-import com.ibm.wala.types.MethodReference;
-import com.ibm.wala.types.TypeReference;
-import com.ibm.wala.util.collections.EmptyIterator;
-import com.ibm.wala.util.collections.HashMapFactory;
-import com.ibm.wala.util.collections.HashSetFactory;
-import com.ibm.wala.util.collections.Pair;
-import com.ibm.wala.util.debug.Assertions;
 import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -80,10 +46,12 @@ import java.util.Comparator;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
+import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.Vector;
+
 import org.eclipse.jdt.core.dom.AST;
 import org.eclipse.jdt.core.dom.ASTNode;
 import org.eclipse.jdt.core.dom.AbstractTypeDeclaration;
@@ -163,6 +131,44 @@ import org.eclipse.jdt.core.dom.VariableDeclarationFragment;
 import org.eclipse.jdt.core.dom.VariableDeclarationStatement;
 import org.eclipse.jdt.core.dom.WhileStatement;
 
+import com.ibm.wala.analysis.typeInference.JavaPrimitiveType;
+import com.ibm.wala.cast.ir.translator.AstTranslator.InternalCAstSymbol;
+import com.ibm.wala.cast.ir.translator.TranslatorToCAst;
+import com.ibm.wala.cast.java.loader.Util;
+import com.ibm.wala.cast.java.translator.JavaProcedureEntity;
+import com.ibm.wala.cast.tree.CAst;
+import com.ibm.wala.cast.tree.CAstAnnotation;
+import com.ibm.wala.cast.tree.CAstControlFlowMap;
+import com.ibm.wala.cast.tree.CAstEntity;
+import com.ibm.wala.cast.tree.CAstNode;
+import com.ibm.wala.cast.tree.CAstNodeTypeMap;
+import com.ibm.wala.cast.tree.CAstQualifier;
+import com.ibm.wala.cast.tree.CAstSourcePositionMap;
+import com.ibm.wala.cast.tree.CAstSourcePositionMap.Position;
+import com.ibm.wala.cast.tree.CAstType;
+import com.ibm.wala.cast.tree.impl.CAstControlFlowRecorder;
+import com.ibm.wala.cast.tree.impl.CAstImpl;
+import com.ibm.wala.cast.tree.impl.CAstNodeTypeMapRecorder;
+import com.ibm.wala.cast.tree.impl.CAstOperator;
+import com.ibm.wala.cast.tree.impl.CAstSourcePositionRecorder;
+import com.ibm.wala.cast.tree.impl.CAstSymbolImpl;
+import com.ibm.wala.cast.tree.rewrite.CAstRewriter.CopyKey;
+import com.ibm.wala.cast.tree.rewrite.CAstRewriter.RewriteContext;
+import com.ibm.wala.cast.tree.rewrite.CAstRewriterFactory;
+import com.ibm.wala.cast.util.CAstPrinter;
+import com.ibm.wala.classLoader.CallSiteReference;
+import com.ibm.wala.shrike.shrikeBT.Constants;
+import com.ibm.wala.shrike.shrikeBT.IInvokeInstruction;
+import com.ibm.wala.types.ClassLoaderReference;
+import com.ibm.wala.types.FieldReference;
+import com.ibm.wala.types.MethodReference;
+import com.ibm.wala.types.TypeReference;
+import com.ibm.wala.util.collections.EmptyIterator;
+import com.ibm.wala.util.collections.HashMapFactory;
+import com.ibm.wala.util.collections.HashSetFactory;
+import com.ibm.wala.util.collections.Pair;
+import com.ibm.wala.util.debug.Assertions;
+
 // TOTEST:
 // "1/0" surrounded by catch ArithmeticException & RunTimeException (TryCatchContext.getCatchTypes"
 // another subtype of ArithmeticException surrounded by catch ArithmeticException
@@ -186,7 +192,7 @@ import org.eclipse.jdt.core.dom.WhileStatement;
 // * enums (probably in simplename or something. but using resolveConstantExpressionValue()
 // possible)
 
-public abstract class JDTJava2CAstTranslator<T extends Position> {
+public abstract class JDTJava2CAstTranslator<T extends Position> implements TranslatorToCAst {
   protected boolean dump = false;
 
   protected final CAst fFactory = new CAstImpl();
@@ -200,7 +206,7 @@ public abstract class JDTJava2CAstTranslator<T extends Position> {
 
   protected final JDTTypeDictionary fTypeDict;
 
-  protected final JavaSourceLoaderImpl fSourceLoader;
+  protected final ClassLoaderReference fSourceLoaderRef;
 
   protected final ITypeBinding fDivByZeroExcType;
 
@@ -222,12 +228,14 @@ public abstract class JDTJava2CAstTranslator<T extends Position> {
 
   protected final CompilationUnit cu;
 
+  private final List<CAstRewriterFactory<?, ?>> rewriters = new LinkedList<>();
+
   //
   // COMPILATION UNITS & TYPES
   //
 
   public JDTJava2CAstTranslator(
-      JavaSourceLoaderImpl sourceLoader,
+      ClassLoaderReference sourceLoader,
       CompilationUnit astRoot,
       String fullPath,
       boolean replicateForDoLoops) {
@@ -235,7 +243,7 @@ public abstract class JDTJava2CAstTranslator<T extends Position> {
   }
 
   public JDTJava2CAstTranslator(
-      JavaSourceLoaderImpl sourceLoader,
+      ClassLoaderReference sourceLoader,
       CompilationUnit astRoot,
       String fullPath,
       boolean replicateForDoLoops,
@@ -247,7 +255,7 @@ public abstract class JDTJava2CAstTranslator<T extends Position> {
     ExceptionInInitializerError = FakeExceptionTypeBinding.initException;
     OutOfMemoryError = FakeExceptionTypeBinding.outOfMemory;
 
-    this.fSourceLoader = sourceLoader;
+    this.fSourceLoaderRef = sourceLoader;
     this.cu = astRoot;
 
     this.fullPath = fullPath;
@@ -258,10 +266,17 @@ public abstract class JDTJava2CAstTranslator<T extends Position> {
     this.dump = dump;
 
     // FIXME: we might need one AST (-> "Object" class) for all files.
-    fIdentityMapper = new JDTIdentityMapper(fSourceLoader.getReference(), ast);
+    fIdentityMapper = new JDTIdentityMapper(fSourceLoaderRef, ast);
     fTypeDict = new JDTTypeDictionary(ast, fIdentityMapper);
 
     fRuntimeExcType = FakeExceptionTypeBinding.runtimeException;
+  }
+
+  @Override
+  public <C extends RewriteContext<K>, K extends CopyKey<K>> void addRewriter(
+      CAstRewriterFactory<C, K> factory, boolean prepend) {
+    if (prepend) rewriters.add(0, factory);
+    else rewriters.add(factory);
   }
 
   public CAstEntity translateToCAst() {
@@ -279,7 +294,12 @@ public abstract class JDTJava2CAstTranslator<T extends Position> {
       }
     }
 
-    return new CompilationUnitEntity(cu.getPackage(), declEntities);
+    CAstEntity e = new CompilationUnitEntity(cu.getPackage(), declEntities);
+
+    CAstImpl Ast = new CAstImpl();
+    for (CAstRewriterFactory<?, ?> rwf : rewriters) e = rwf.createCAstRewriter(Ast).rewrite(e);
+
+    return e;
   }
 
   //
@@ -524,7 +544,7 @@ public abstract class JDTJava2CAstTranslator<T extends Position> {
               createEnumConstructorWithParameters(
                   metDecl.resolveBinding(), metDecl, context, inits, metDecl));
         else {
-          memberEntities.add(visit(metDecl, typeBinding, context, inits));
+          memberEntities.add(visit(metDecl, typeBinding, context, inits, false));
 
           // /////////////// Java 1.5 "overridden with subtype" thing (covariant return type)
           // ///////////
@@ -700,7 +720,7 @@ public abstract class JDTJava2CAstTranslator<T extends Position> {
     fakeCtor.setSourceRange(positioningNode.getStartPosition(), positioningNode.getLength());
     fakeCtor.setBody(ast.newBlock());
 
-    return visit(fakeCtor, classBinding, oldContext, inits);
+    return visit(fakeCtor, classBinding, oldContext, inits, true);
   }
 
   private static IMethodBinding findDefaultCtor(ITypeBinding superClass) {
@@ -886,7 +906,8 @@ public abstract class JDTJava2CAstTranslator<T extends Position> {
       MethodDeclaration n,
       ITypeBinding classBinding,
       WalkContext oldContext,
-      ArrayList<ASTNode> inits) {
+      ArrayList<ASTNode> inits,
+      boolean synthetic) {
 
     // pass in memberEntities to the context, later visit(New) etc. may add classes
     final Map<CAstNode, CAstEntity> memberEntities = new LinkedHashMap<>();
@@ -923,7 +944,8 @@ public abstract class JDTJava2CAstTranslator<T extends Position> {
       annotations = handleAnnotations(n.resolveBinding());
     }
 
-    return new ProcedureEntity(mdast, n, classBinding, memberEntities, context, annotations);
+    return new ProcedureEntity(
+        mdast, n, classBinding, memberEntities, context, annotations, synthetic);
   }
 
   private Set<CAstAnnotation> handleAnnotations(IBinding binding) {
@@ -1009,7 +1031,11 @@ public abstract class JDTJava2CAstTranslator<T extends Position> {
     private final Set<CAstAnnotation> annotations;
 
     // can be method, constructor, "fake" default constructor, or null decl = static initializer
-    /** For a static initializer, pass a null decl. */
+    /**
+     * For a static initializer, pass a null decl.
+     *
+     * @param synthetic
+     */
     // FIXME: get rid of decl and pass in everything instead of having to do two different things
     // with parameters
     // regular case
@@ -1019,8 +1045,18 @@ public abstract class JDTJava2CAstTranslator<T extends Position> {
         ITypeBinding type,
         Map<CAstNode, CAstEntity> entities,
         MethodContext context,
-        Set<CAstAnnotation> annotations) {
-      this(mdast, decl, type, entities, context, null, null, decl.getModifiers(), annotations);
+        Set<CAstAnnotation> annotations,
+        boolean synthetic) {
+      this(
+          mdast,
+          decl,
+          type,
+          entities,
+          context,
+          null,
+          null,
+          decl.getModifiers() | (synthetic ? Constants.ACC_SYNTHETIC : 0),
+          annotations);
     }
 
     // static init
