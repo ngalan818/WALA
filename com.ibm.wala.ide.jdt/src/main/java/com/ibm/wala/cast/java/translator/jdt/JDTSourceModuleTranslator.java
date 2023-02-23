@@ -193,7 +193,8 @@ public class JDTSourceModuleTranslator implements SourceModuleTranslator {
 
   protected JDTJava2CAstTranslator<JdtPosition> makeCAstTranslator(
       CompilationUnit cu, final IFile sourceFile, String fullPath) {
-    return new JDTJava2CAstTranslator<JdtPosition>(sourceLoader, cu, fullPath, false, dump) {
+    return new JDTJava2CAstTranslator<JdtPosition>(
+        sourceLoader.getReference(), cu, fullPath, false, dump) {
       @Override
       public JdtPosition makePosition(int start, int end) {
         return new JdtPosition(

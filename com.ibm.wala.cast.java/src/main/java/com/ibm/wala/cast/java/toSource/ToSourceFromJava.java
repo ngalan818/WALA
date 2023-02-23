@@ -133,7 +133,7 @@ public class ToSourceFromJava extends ToSource {
                     toSource(fr.getFieldTypeReference()).getName() + " " + fr.getName() + ";");
               }
               for (IMethod m : cls.getDeclaredMethods()) {
-                if (code.containsKey(m) && !m.isSynthetic()) {
+                if (code.containsKey(m)) {
                   for (TypeReference e : m.getDeclaredExceptions()) {
                     Pair<String, String> key =
                         Pair.make(

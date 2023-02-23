@@ -11,9 +11,22 @@
 package com.ibm.wala.util.collections;
 
 import java.util.Iterator;
+import java.util.Spliterator;
+import java.util.Spliterators;
+import java.util.stream.Stream;
+import java.util.stream.StreamSupport;
 
 /** utilities dealing with Iterators */
 public class IteratorUtil {
+
+  public static <T> Stream<T> streamify(Iterable<T> stuff) {
+    return streamify(stuff.iterator());
+  }
+
+  public static <T> Stream<T> streamify(Iterator<T> iterator) {
+    return StreamSupport.stream(
+        Spliterators.spliteratorUnknownSize(iterator, Spliterator.ORDERED), false);
+  }
 
   /** @return true iff the Iterator returns some elements which equals() the object o */
   public static <T> boolean contains(Iterator<? extends T> it, T o) {

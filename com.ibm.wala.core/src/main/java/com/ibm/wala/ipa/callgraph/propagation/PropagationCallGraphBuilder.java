@@ -191,6 +191,10 @@ public abstract class PropagationCallGraphBuilder implements CallGraphBuilder<In
     return makeCallGraph(options, null);
   }
 
+  protected boolean fixpointCallback() {
+    return false;
+  }
+
   /*
    * @see com.ibm.wala.ipa.callgraph.CallGraphBuilder#makeCallGraph(com.ibm.wala.ipa.callgraph.AnalysisOptions)
    */
@@ -247,14 +251,17 @@ public abstract class PropagationCallGraphBuilder implements CallGraphBuilder<In
     customInit();
 
     solver = makeSolver();
-    try {
-      solver.solve(monitor);
-    } catch (CancelException | CancelRuntimeException e) {
-      CallGraphBuilderCancelException c =
-          CallGraphBuilderCancelException.createCallGraphBuilderCancelException(
-              e, callGraph, system.extractPointerAnalysis(this));
-      throw c;
-    }
+
+    do {
+      try {
+        solver.solve(monitor);
+      } catch (CancelException | CancelRuntimeException e) {
+        CallGraphBuilderCancelException c =
+            CallGraphBuilderCancelException.createCallGraphBuilderCancelException(
+                e, callGraph, system.extractPointerAnalysis(this));
+        throw c;
+      }
+    } while (fixpointCallback());
 
     return callGraph;
   }

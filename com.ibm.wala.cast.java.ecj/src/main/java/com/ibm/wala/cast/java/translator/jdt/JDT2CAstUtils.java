@@ -153,11 +153,20 @@ public class JDT2CAstUtils {
     // JLS 5.6.2
     ITypeBinding doble = ast.resolveWellKnownType("double");
     if (t1.equals(doble) || t2.equals(doble)) return doble;
-    ITypeBinding flotando = ast.resolveWellKnownType("float");
-    if (t1.equals(flotando) || t2.equals(flotando)) return flotando;
-    ITypeBinding largo = ast.resolveWellKnownType("long");
-    if (t1.equals(largo) || t2.equals(largo)) return largo;
-    return ast.resolveWellKnownType("int");
+    else {
+      ITypeBinding flotando = ast.resolveWellKnownType("float");
+      if (t1.equals(flotando) || t2.equals(flotando)) return flotando;
+      else {
+        ITypeBinding largo = ast.resolveWellKnownType("long");
+        if (t1.equals(largo) || t2.equals(largo)) return largo;
+        else {
+          if (t1.equals(t2)) return t1;
+          else {
+            return ast.resolveWellKnownType("int");
+          }
+        }
+      }
+    }
   }
 
   public static ITypeBinding getDeclaringClassOfNode(ASTNode n) {

@@ -37,6 +37,44 @@
  */
 package com.ibm.wala.cast.java.translator.jdt;
 
+import com.ibm.wala.analysis.typeInference.JavaPrimitiveType;
+import com.ibm.wala.cast.ir.translator.AstTranslator.InternalCAstSymbol;
+import com.ibm.wala.cast.ir.translator.TranslatorToCAst;
+import com.ibm.wala.cast.java.loader.Util;
+import com.ibm.wala.cast.java.translator.JavaProcedureEntity;
+import com.ibm.wala.cast.java.types.JavaPrimitiveTypeMap;
+import com.ibm.wala.cast.tree.CAst;
+import com.ibm.wala.cast.tree.CAstAnnotation;
+import com.ibm.wala.cast.tree.CAstControlFlowMap;
+import com.ibm.wala.cast.tree.CAstEntity;
+import com.ibm.wala.cast.tree.CAstNode;
+import com.ibm.wala.cast.tree.CAstNodeTypeMap;
+import com.ibm.wala.cast.tree.CAstQualifier;
+import com.ibm.wala.cast.tree.CAstSourcePositionMap;
+import com.ibm.wala.cast.tree.CAstSourcePositionMap.Position;
+import com.ibm.wala.cast.tree.CAstType;
+import com.ibm.wala.cast.tree.impl.CAstControlFlowRecorder;
+import com.ibm.wala.cast.tree.impl.CAstImpl;
+import com.ibm.wala.cast.tree.impl.CAstNodeTypeMapRecorder;
+import com.ibm.wala.cast.tree.impl.CAstOperator;
+import com.ibm.wala.cast.tree.impl.CAstSourcePositionRecorder;
+import com.ibm.wala.cast.tree.impl.CAstSymbolImpl;
+import com.ibm.wala.cast.tree.rewrite.CAstRewriter.CopyKey;
+import com.ibm.wala.cast.tree.rewrite.CAstRewriter.RewriteContext;
+import com.ibm.wala.cast.tree.rewrite.CAstRewriterFactory;
+import com.ibm.wala.cast.util.CAstPrinter;
+import com.ibm.wala.classLoader.CallSiteReference;
+import com.ibm.wala.shrike.shrikeBT.Constants;
+import com.ibm.wala.shrike.shrikeBT.IInvokeInstruction;
+import com.ibm.wala.types.ClassLoaderReference;
+import com.ibm.wala.types.FieldReference;
+import com.ibm.wala.types.MethodReference;
+import com.ibm.wala.types.TypeReference;
+import com.ibm.wala.util.collections.EmptyIterator;
+import com.ibm.wala.util.collections.HashMapFactory;
+import com.ibm.wala.util.collections.HashSetFactory;
+import com.ibm.wala.util.collections.Pair;
+import com.ibm.wala.util.debug.Assertions;
 import java.io.PrintWriter;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -51,7 +89,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.Vector;
-
 import org.eclipse.jdt.core.dom.AST;
 import org.eclipse.jdt.core.dom.ASTNode;
 import org.eclipse.jdt.core.dom.AbstractTypeDeclaration;
@@ -130,44 +167,6 @@ import org.eclipse.jdt.core.dom.VariableDeclarationExpression;
 import org.eclipse.jdt.core.dom.VariableDeclarationFragment;
 import org.eclipse.jdt.core.dom.VariableDeclarationStatement;
 import org.eclipse.jdt.core.dom.WhileStatement;
-
-import com.ibm.wala.analysis.typeInference.JavaPrimitiveType;
-import com.ibm.wala.cast.ir.translator.AstTranslator.InternalCAstSymbol;
-import com.ibm.wala.cast.ir.translator.TranslatorToCAst;
-import com.ibm.wala.cast.java.loader.Util;
-import com.ibm.wala.cast.java.translator.JavaProcedureEntity;
-import com.ibm.wala.cast.tree.CAst;
-import com.ibm.wala.cast.tree.CAstAnnotation;
-import com.ibm.wala.cast.tree.CAstControlFlowMap;
-import com.ibm.wala.cast.tree.CAstEntity;
-import com.ibm.wala.cast.tree.CAstNode;
-import com.ibm.wala.cast.tree.CAstNodeTypeMap;
-import com.ibm.wala.cast.tree.CAstQualifier;
-import com.ibm.wala.cast.tree.CAstSourcePositionMap;
-import com.ibm.wala.cast.tree.CAstSourcePositionMap.Position;
-import com.ibm.wala.cast.tree.CAstType;
-import com.ibm.wala.cast.tree.impl.CAstControlFlowRecorder;
-import com.ibm.wala.cast.tree.impl.CAstImpl;
-import com.ibm.wala.cast.tree.impl.CAstNodeTypeMapRecorder;
-import com.ibm.wala.cast.tree.impl.CAstOperator;
-import com.ibm.wala.cast.tree.impl.CAstSourcePositionRecorder;
-import com.ibm.wala.cast.tree.impl.CAstSymbolImpl;
-import com.ibm.wala.cast.tree.rewrite.CAstRewriter.CopyKey;
-import com.ibm.wala.cast.tree.rewrite.CAstRewriter.RewriteContext;
-import com.ibm.wala.cast.tree.rewrite.CAstRewriterFactory;
-import com.ibm.wala.cast.util.CAstPrinter;
-import com.ibm.wala.classLoader.CallSiteReference;
-import com.ibm.wala.shrike.shrikeBT.Constants;
-import com.ibm.wala.shrike.shrikeBT.IInvokeInstruction;
-import com.ibm.wala.types.ClassLoaderReference;
-import com.ibm.wala.types.FieldReference;
-import com.ibm.wala.types.MethodReference;
-import com.ibm.wala.types.TypeReference;
-import com.ibm.wala.util.collections.EmptyIterator;
-import com.ibm.wala.util.collections.HashMapFactory;
-import com.ibm.wala.util.collections.HashSetFactory;
-import com.ibm.wala.util.collections.Pair;
-import com.ibm.wala.util.debug.Assertions;
 
 // TOTEST:
 // "1/0" surrounded by catch ArithmeticException & RunTimeException (TryCatchContext.getCatchTypes"
@@ -390,9 +389,8 @@ public abstract class JDTJava2CAstTranslator<T extends Position> implements Tran
 
     @Override
     public Iterator<CAstEntity> getScopedEntities(CAstNode construct) {
-      Assertions.UNREACHABLE(
-          "Non-AST-bearing entity (ClassEntity) asked for scoped entities related to a given AST node");
-      return null;
+      assert construct == null : "ClassEntity has no explicit CAst nodes";
+      return fEntities.iterator();
     }
 
     @Override
@@ -4000,9 +3998,8 @@ public abstract class JDTJava2CAstTranslator<T extends Position> implements Tran
 
     @Override
     public Iterator<CAstEntity> getScopedEntities(CAstNode construct) {
-      Assertions.UNREACHABLE(
-          "CompilationUnitEntity asked for AST-related entities, but it has no AST.");
-      return null;
+      assert construct == null : "compilation unit has no explicit AST nodes";
+      return fTopLevelDecls.iterator();
     }
 
     @Override
@@ -4040,8 +4037,7 @@ public abstract class JDTJava2CAstTranslator<T extends Position> implements Tran
 
     @Override
     public CAstType getType() {
-      Assertions.UNREACHABLE("CompilationUnitEntity.getType()");
-      return null;
+      return JavaPrimitiveTypeMap.VoidType;
     }
 
     @Override
