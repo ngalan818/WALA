@@ -103,7 +103,9 @@ import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.Stack;
 import java.util.function.BiFunction;
 import java.util.function.BiPredicate;
 import java.util.function.Consumer;
@@ -111,6 +113,7 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class ToSource {
 
@@ -222,6 +225,20 @@ public class ToSource {
       }
     }
 
+    private ISSABasicBlock findBlock(SSAPhiInstruction phi) {
+      for (ISSABasicBlock bb : cfg) {
+        Iterator<SSAPhiInstruction> bi = bb.iteratePhis();
+        while (bi.hasNext()) {
+          if (bi.next().equals(phi)) {
+            return bb;
+          }
+        }
+      }
+
+      assert false : "cannot find " + phi;
+      return null;
+    }
+
     private void gatherInstructions(
         Set<SSAInstruction> stuff,
         IR ir,
@@ -231,6 +248,56 @@ public class ToSource {
         Heap<List<SSAInstruction>> chunks,
         IntSet unmergeableValues,
         SSAInstruction loopControl) {
+
+      if (inst instanceof SSAPhiInstruction) {
+        System.err.println("looking at PHI " + inst + " for " + regionInsts);
+        boolean ok = true;
+        ISSABasicBlock bb = findBlock((SSAPhiInstruction) inst);
+        System.err.println("block " + bb);
+        ISSABasicBlock condPred = null;
+        Map<ISSABasicBlock, Object> condPredLabels = HashMapFactory.make();
+        check_preds:
+        {
+          for (Iterator<ISSABasicBlock> pbs = cfg.getPredNodes(bb); pbs.hasNext(); ) {
+            ISSABasicBlock pb = pbs.next();
+            System.err.println("pred " + pb);
+            for (Iterator<ISSABasicBlock> cps = cdg.getPredNodes(pb); cps.hasNext(); ) {
+              ISSABasicBlock cp = cps.next();
+
+              if (condPred == null) {
+                condPred = cp;
+              } else if (condPred != cp) {
+                ok = false;
+                break check_preds;
+              }
+
+              if (cdg.getEdgeLabels(cp, pb).size() != 1) {
+                ok = false;
+                break check_preds;
+              }
+              Object label = cdg.getEdgeLabels(cp, pb).iterator().next();
+              if (condPredLabels.values().contains(label)) {
+                ok = false;
+                break check_preds;
+              } else {
+                condPredLabels.put(pb, label);
+              }
+            }
+          }
+
+          SSAInstruction choice = condPred.getLastInstruction();
+          if (!regionInsts.contains(choice)) {
+            ok = false;
+            break check_preds;
+          }
+        }
+
+        if (ok) {
+          System.err.println(
+              "found nested for " + inst + " and " + condPred + ", " + condPredLabels);
+        }
+      }
+
       if (!stuff.contains(inst) && regionInsts.contains(inst)) {
 
         boolean depOk = false;
@@ -783,8 +850,9 @@ public class ToSource {
                                     livenessConflicts.add(mergePhis.find(vn), mergePhis.find(def));
                                   });
 
-                              System.err.println("merging " + def + " and " + use);
                               mergePhis.union(def, use);
+                              System.err.println(
+                                  "merging " + def + " and " + use + " as " + mergePhis.find(def));
                               mergedValues.add(use);
                               mergedValues.add(def);
                             }
@@ -852,7 +920,7 @@ public class ToSource {
                                     List<SSAInstruction> ii;
                                     if ((Util.endsWithConditionalBranch(cfg, bb)
                                             && (Util.getTakenSuccessor(cfg, bb).equals(sb)
-                                                || Util.getNotTakenSuccessor(cfg, bb).equals(bb)))
+                                                || Util.getNotTakenSuccessor(cfg, bb).equals(sb)))
                                         || (Util.endsWithSwitch(cfg, bb)
                                             && Util.getFallThruBlock(cfg, bb).equals(sb))) {
 
@@ -870,6 +938,7 @@ public class ToSource {
                                         orderPhisAndDetectCycles(sb.iteratePhis());
                                     System.err.println("order: " + order);
 
+                                    List<AssignInstruction> as = new LinkedList<>();
                                     order
                                         .snd
                                         .iterator()
@@ -895,7 +964,8 @@ public class ToSource {
                                                           .intIterator()
                                                           .next();
                                                   ir.getSymbolTable().ensureSymbol(tmp);
-                                                  ii.add(
+                                                  as.add(
+                                                      0,
                                                       new AssignInstruction(
                                                           bb.getLastInstructionIndex() + 1,
                                                           tmp,
@@ -938,10 +1008,13 @@ public class ToSource {
                                                           + lv);
                                                 }
 
-                                                System.err.println("adding " + assign);
-                                                ii.add(assign);
+                                                System.err.println(
+                                                    "adding " + assign + " for " + bb + " --> "
+                                                        + sb);
+                                                as.add(assign);
                                               }
                                             });
+                                    ii.addAll(as);
                                   });
                         });
 
@@ -1123,7 +1196,7 @@ public class ToSource {
           chunkInsts -> {
             if (!gotoChunk(chunkInsts)) {
               Pair<CAstNode, List<CAstNode>> stuff =
-                  makeToCAst(chunkInsts).processChunk(decls, packages);
+                  makeToCAst(chunkInsts).processChunk(decls, packages, false);
               elts.add(stuff.fst);
               decls.addAll(stuff.snd);
             }
@@ -1132,7 +1205,8 @@ public class ToSource {
           .filter(this::gotoChunk)
           .forEach(
               c -> {
-                Pair<CAstNode, List<CAstNode>> stuff = makeToCAst(c).processChunk(decls, packages);
+                Pair<CAstNode, List<CAstNode>> stuff =
+                    makeToCAst(c).processChunk(decls, packages, false);
                 elts.add(stuff.fst);
                 decls.addAll(stuff.snd);
               });
@@ -1199,6 +1273,7 @@ public class ToSource {
       private final CodeGenerationContext c;
 
       protected class Visitor implements AstPreInstructionVisitor {
+        private Stack<Set<SSAInstruction>> history;
         private CAstNode node = ast.makeNode(CAstNode.EMPTY);
         private List<SSAInstruction> chunk;
         private Map<SSAInstruction, Map<ISSABasicBlock, RegionTreeNode>> children;
@@ -1207,15 +1282,38 @@ public class ToSource {
         private final List<CAstNode> decls = new LinkedList<>();
         private final Map<String, Set<String>> packages;
 
+        private void logHistory(SSAInstruction inst) {
+          if (history != null && !history.isEmpty()) {
+            history.peek().add(inst);
+          }
+        }
+
+        private void startLog() {
+          if (history == null) {
+            history = new Stack<>();
+          }
+          history.push(HashSetFactory.make());
+        }
+
+        private Set<SSAInstruction> endLog() {
+          assert history != null && !history.isEmpty();
+          Set<SSAInstruction> h = history.pop();
+          if (!history.isEmpty()) {
+            history.peek().addAll(h);
+          }
+          return h;
+        }
+
         public Visitor(
             SSAInstruction root,
             CodeGenerationContext c,
-            List<SSAInstruction> chunk2,
+            List<SSAInstruction> chunk,
             List<CAstNode> parentDecls,
             Map<String, Set<String>> parentPackages,
-            Map<SSAInstruction, Map<ISSABasicBlock, RegionTreeNode>> children) {
+            Map<SSAInstruction, Map<ISSABasicBlock, RegionTreeNode>> children,
+            boolean extraHeaderCode) {
           this.root = root;
-          this.chunk = chunk2;
+          this.chunk = chunk;
           this.children = children;
           this.parentDecls = parentDecls;
           this.packages = parentPackages;
@@ -1223,7 +1321,8 @@ public class ToSource {
           if (root.hasDef()) {
             if (node.getKind() != CAstNode.EMPTY) {
               int def = root.getDef();
-              if (mergedValues.contains(mergePhis.find(def))
+              if (extraHeaderCode
+                  || mergedValues.contains(mergePhis.find(def))
                   || du.getDef(def) instanceof SSAPhiInstruction) {
                 CAstNode val = node;
                 node =
@@ -1285,6 +1384,7 @@ public class ToSource {
           } else {
             SSAInstruction inst = du.getDef(vn);
             if (chunk.contains(inst)) {
+              logHistory(inst);
               inst.visit(this);
               if (root instanceof SSAConditionalBranchInstruction
                   && loopControls.contains(cfg.getBlockForInstruction(root.iIndex()))
@@ -1500,7 +1600,8 @@ public class ToSource {
             assert inst instanceof AssignInstruction;
             Visitor v =
                 makeToCAst(insts)
-                    .makeVisitor(inst, c, Collections.singletonList(inst), parentDecls, packages);
+                    .makeVisitor(
+                        inst, c, Collections.singletonList(inst), parentDecls, packages, false);
             lp.add(
                 ast.makeNode(
                     CAstNode.EXPR_STMT,
@@ -1513,7 +1614,7 @@ public class ToSource {
         @Override
         public void visitConditionalBranch(SSAConditionalBranchInstruction instruction) {
           assert children.containsKey(instruction) : "children of " + instruction + ":" + children;
-
+          Set<SSAInstruction> testInsts;
           CAstOperator castOp = null;
           IConditionalBranchInstruction.IOperator op = instruction.getOperator();
           if (op instanceof IConditionalBranchInstruction.Operator) {
@@ -1544,8 +1645,10 @@ public class ToSource {
           CAstNode test;
           test:
           {
+            startLog();
             CAstNode v1 = visit(instruction.getUse(0));
             CAstNode v2 = visit(instruction.getUse(1));
+            testInsts = endLog();
             if (v2.getValue() instanceof Number && ((Number) v2.getValue()).equals(0)) {
               if (castOp == CAstOperator.OP_NE) {
                 test = v1;
@@ -1566,7 +1669,46 @@ public class ToSource {
             ISSABasicBlock body = cfg.getBlockForInstruction(instruction.iIndex() + 1);
             List<List<SSAInstruction>> loopChunks = regionChunks.get(Pair.make(instruction, body));
             RegionTreeNode lr = cc.get(body);
-            List<CAstNode> loopBlock = handleBlock(loopChunks, lr);
+            List<CAstNode> loopBlock = handleBlock(loopChunks, lr, false);
+
+            System.err.println("loop test insts: " + testInsts);
+            Optional<Stream<ISSABasicBlock>> blocks =
+                IteratorUtil.streamify(
+                        cdg.getPredNodes(cfg.getBlockForInstruction(instruction.iIndex())))
+                    .filter(b -> b != cfg.getBlockForInstruction(instruction.iIndex()))
+                    .map(pb -> IteratorUtil.streamify(cdg.getSuccNodes(pb)))
+                    .reduce((a, b) -> Stream.concat(a, b));
+            assert blocks.isPresent();
+            Optional<Stream<SSAInstruction>> insts =
+                blocks
+                    .get()
+                    .map(eb -> IteratorUtil.streamify(eb.iterator()))
+                    .reduce((a, b) -> Stream.concat(a, b));
+            assert insts.isPresent();
+            List<SSAInstruction> depInsts = insts.get().collect(Collectors.toList());
+            System.err.println("dep insts: " + depInsts);
+
+            List<SSAInstruction> header =
+                depInsts.stream()
+                    .filter(
+                        i ->
+                            cdg.hasEdge(
+                                    cfg.getBlockForInstruction(instruction.iIndex()),
+                                    cfg.getBlockForInstruction(i.iIndex()))
+                                && i != instruction
+                                && !testInsts.contains(i))
+                    .collect(Collectors.toList());
+
+            System.err.println("loop header insts: " + header);
+
+            if (!header.isEmpty()) {
+              List<CAstNode> hb = handleBlock(Collections.singletonList(header), lr, true);
+              System.err.println(decls);
+              System.err.println(parentDecls);
+              System.err.println(hb);
+              hb.addAll(loopBlock);
+              loopBlock = hb;
+            }
 
             node =
                 ast.makeNode(
@@ -1587,7 +1729,7 @@ public class ToSource {
               List<List<SSAInstruction>> afterChunks =
                   regionChunks.get(Pair.make(instruction, after));
               RegionTreeNode ar = cc.get(after);
-              List<CAstNode> afterBlock = handleBlock(afterChunks, ar);
+              List<CAstNode> afterBlock = handleBlock(afterChunks, ar, false);
 
               node =
                   ast.makeNode(
@@ -1607,7 +1749,7 @@ public class ToSource {
               List<List<SSAInstruction>> takenChunks =
                   regionChunks.get(Pair.make(instruction, taken));
               RegionTreeNode tr = cc.get(taken);
-              takenBlock = handleBlock(takenChunks, tr);
+              takenBlock = handleBlock(takenChunks, tr, false);
 
             } else {
               assert cc.size() == 1;
@@ -1619,7 +1761,7 @@ public class ToSource {
                 Pair.make(instruction, notTaken);
             List<List<SSAInstruction>> notTakenChunks = regionChunks.get(notTakenKey);
             RegionTreeNode fr = cc.get(notTaken);
-            List<CAstNode> notTakenBlock = handleBlock(notTakenChunks, fr);
+            List<CAstNode> notTakenBlock = handleBlock(notTakenChunks, fr, false);
 
             CAstNode notTakenStmt =
                 notTakenBlock.size() == 1
@@ -1653,14 +1795,21 @@ public class ToSource {
         }
 
         private List<CAstNode> handleBlock(
-            List<List<SSAInstruction>> loopChunks, RegionTreeNode lr) {
+            List<List<SSAInstruction>> loopChunks, RegionTreeNode lr, boolean extraHeaderCode) {
 
           List<Pair<CAstNode, List<CAstNode>>> normalStuff =
               handleInsts(
-                  loopChunks, lr, x -> !(x.iterator().next() instanceof SSAGotoInstruction));
+                  loopChunks,
+                  lr,
+                  x -> !(x.iterator().next() instanceof SSAGotoInstruction),
+                  extraHeaderCode);
 
           List<Pair<CAstNode, List<CAstNode>>> gotoStuff =
-              handleInsts(loopChunks, lr, x -> x.iterator().next() instanceof SSAGotoInstruction);
+              handleInsts(
+                  loopChunks,
+                  lr,
+                  x -> x.iterator().next() instanceof SSAGotoInstruction,
+                  extraHeaderCode);
 
           List<CAstNode> block = new LinkedList<>();
           normalStuff.forEach(p -> block.addAll(p.snd));
@@ -1674,13 +1823,14 @@ public class ToSource {
         private List<Pair<CAstNode, List<CAstNode>>> handleInsts(
             List<List<SSAInstruction>> loopChunks,
             RegionTreeNode lr,
-            Predicate<? super List<SSAInstruction>> assignFilter) {
+            Predicate<? super List<SSAInstruction>> assignFilter,
+            boolean extraHeaderCode) {
           if (loopChunks == null || loopChunks.isEmpty()) {
             return Collections.emptyList();
           } else {
             return IteratorUtil.streamify(loopChunks)
                 .filter(assignFilter)
-                .map(c -> lr.makeToCAst(c).processChunk(parentDecls, packages))
+                .map(c -> lr.makeToCAst(c).processChunk(parentDecls, packages, extraHeaderCode))
                 .collect(Collectors.toList());
           }
         }
@@ -1700,7 +1850,7 @@ public class ToSource {
             List<List<SSAInstruction>> labelChunks =
                 regionChunks.get(Pair.make(instruction, caseBlock));
             RegionTreeNode fr = cc.get(caseBlock);
-            List<CAstNode> labelBlock = handleBlock(labelChunks, fr);
+            List<CAstNode> labelBlock = handleBlock(labelChunks, fr, false);
             switchCode.add(
                 ast.makeNode(
                     CAstNode.LABEL_STMT,
@@ -1714,7 +1864,7 @@ public class ToSource {
           List<List<SSAInstruction>> defaultChunks =
               regionChunks.get(Pair.make(instruction, defaultBlock));
           RegionTreeNode fr = cc.get(defaultBlock);
-          List<CAstNode> defaultStuff = handleBlock(defaultChunks, fr);
+          List<CAstNode> defaultStuff = handleBlock(defaultChunks, fr, false);
 
           node =
               ast.makeNode(
@@ -1915,8 +2065,9 @@ public class ToSource {
           CodeGenerationContext c,
           List<SSAInstruction> chunk2,
           List<CAstNode> parentDecls,
-          Map<String, Set<String>> packages) {
-        return new Visitor(root, c, chunk2, parentDecls, packages, children);
+          Map<String, Set<String>> packages,
+          boolean extraHeaderCode) {
+        return new Visitor(root, c, chunk2, parentDecls, packages, children, extraHeaderCode);
       }
 
       public ToCAst(List<SSAInstruction> insts, CodeGenerationContext c) {
@@ -1925,9 +2076,9 @@ public class ToSource {
       }
 
       Pair<CAstNode, List<CAstNode>> processChunk(
-          List<CAstNode> parentDecls, Map<String, Set<String>> packages) {
+          List<CAstNode> parentDecls, Map<String, Set<String>> packages, boolean extraHeaderCode) {
         SSAInstruction root = chunk.iterator().next();
-        Visitor x = makeVisitor(root, c, chunk, parentDecls, packages);
+        Visitor x = makeVisitor(root, c, chunk, parentDecls, packages, extraHeaderCode);
         return Pair.make(x.node, x.decls);
       }
     }

@@ -531,13 +531,15 @@ public class JSSSAPropagationCallGraphBuilder extends AstSSAPropagationCallGraph
     }
 
     private void handleJavascriptDispatch(
-        final JavaScriptInvoke instruction, final InstanceKey receiverType) {
+        final JavaScriptInvoke instruction,
+        final InstanceKey receiverType,
+        PointerKey receiverKey) {
       int functionVn = instruction.getFunction();
 
       ReflectedFieldAction fieldDispatchAction =
           new ReflectedFieldAction() {
             @Override
-            public void action(final AbstractFieldPointerKey fieldKey) {
+            public void action(final AbstractFieldPointerKey fieldKey, PointerKey objKey) {
               class FieldValueDispatch extends UnaryOperator<PointsToSetVariable> {
                 private JavaScriptInvoke getInstruction() {
                   return instruction;
@@ -621,11 +623,13 @@ public class JSSSAPropagationCallGraphBuilder extends AstSSAPropagationCallGraph
       InstanceKey[] objKeys = new InstanceKey[] {receiverType};
       if (contentsAreInvariant(symbolTable, du, functionVn)) {
         InstanceKey[] fieldsKeys = getInvariantContents(functionVn);
-        newFieldOperationObjectAndFieldConstant(true, fieldDispatchAction, objKeys, fieldsKeys);
+        newFieldOperationObjectAndFieldConstant(
+            true, fieldDispatchAction, objKeys, fieldsKeys, receiverKey);
         newFieldOperationOnlyFieldConstant(true, fieldDispatchAction, prototypeObjs, fieldsKeys);
       } else {
         PointerKey fieldKey = getPointerKeyForLocal(functionVn);
-        newFieldOperationOnlyObjectConstant(true, fieldDispatchAction, fieldKey, objKeys);
+        newFieldOperationOnlyObjectConstant(
+            true, fieldDispatchAction, fieldKey, receiverKey, objKeys);
         newFieldFullOperation(true, fieldDispatchAction, prototypeObjs, fieldKey);
       }
     }
@@ -637,7 +641,7 @@ public class JSSSAPropagationCallGraphBuilder extends AstSSAPropagationCallGraph
         system.recordImplicitPointsToSet(receiverKey);
         InstanceKey[] ik = getInvariantContents(receiverVn);
         for (InstanceKey element : ik) {
-          handleJavascriptDispatch(instruction, element);
+          handleJavascriptDispatch(instruction, element, receiverKey);
         }
       } else {
         class ReceiverForDispatchOp extends UnaryOperator<PointsToSetVariable> {
@@ -664,7 +668,7 @@ public class JSSSAPropagationCallGraphBuilder extends AstSSAPropagationCallGraph
                           throw new CancelRuntimeException(e);
                         }
                         InstanceKey ik = system.getInstanceKey(x);
-                        handleJavascriptDispatch(instruction, ik);
+                        handleJavascriptDispatch(instruction, ik, receiverKey);
                       });
               previous.addAll(rhs.getValue());
             }

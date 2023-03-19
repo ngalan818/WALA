@@ -870,7 +870,7 @@ public abstract class AstSSAPropagationCallGraphBuilder extends SSAPropagationCa
     // /////////////////////////////////////////////////////////////////////////
 
     protected interface ReflectedFieldAction {
-      void action(AbstractFieldPointerKey fieldKey);
+      void action(AbstractFieldPointerKey fieldKey, PointerKey objKey);
 
       void dump(AbstractFieldPointerKey fieldKey, boolean constObj, boolean constProp);
     }
@@ -938,10 +938,11 @@ public abstract class AstSSAPropagationCallGraphBuilder extends SSAPropagationCa
           system.recordImplicitPointsToSet(fieldKey);
           InstanceKey[] fieldsKeys = getInvariantContents(symtab, du, opNode, fieldsVn);
 
-          newFieldOperationObjectAndFieldConstant(isLoadOperation, action, objKeys, fieldsKeys);
+          newFieldOperationObjectAndFieldConstant(
+              isLoadOperation, action, objKeys, fieldsKeys, objKey);
 
         } else {
-          newFieldOperationOnlyObjectConstant(isLoadOperation, action, fieldKey, objKeys);
+          newFieldOperationOnlyObjectConstant(isLoadOperation, action, fieldKey, objKey, objKeys);
         }
 
       } else {
@@ -976,7 +977,8 @@ public abstract class AstSSAPropagationCallGraphBuilder extends SSAPropagationCa
         system.recordImplicitPointsToSet(objKey);
         InstanceKey[] objectKeys = getInvariantContents(symtab, du, opNode, objVn);
 
-        newFieldOperationObjectAndFieldConstant(isLoadOperation, action, objectKeys, fieldsKeys);
+        newFieldOperationObjectAndFieldConstant(
+            isLoadOperation, action, objectKeys, fieldsKeys, objKey);
 
       } else {
         newFieldOperationOnlyFieldConstant(isLoadOperation, action, objKey, fieldsKeys);
@@ -1027,7 +1029,7 @@ public abstract class AstSSAPropagationCallGraphBuilder extends SSAPropagationCa
                                         AbstractFieldPointerKey key =
                                             (AbstractFieldPointerKey) pkey;
                                         if (DEBUG_PROPERTIES) action.dump(key, false, false);
-                                        action.action(key);
+                                        action.action(key, objKey);
                                       }
                                     }
                                   });
@@ -1082,7 +1084,7 @@ public abstract class AstSSAPropagationCallGraphBuilder extends SSAPropagationCa
                                       getPointerKeysForReflectedFieldRead(object, fieldsKey))) {
                                 AbstractFieldPointerKey key = (AbstractFieldPointerKey) pkey;
                                 if (DEBUG_PROPERTIES) action.dump(key, true, false);
-                                action.action(key);
+                                action.action(key, objKey);
                               }
                             } else {
                               if (objCatalog != null) {
@@ -1093,7 +1095,7 @@ public abstract class AstSSAPropagationCallGraphBuilder extends SSAPropagationCa
                                       getPointerKeysForReflectedFieldWrite(object, fieldsKey))) {
                                 AbstractFieldPointerKey key = (AbstractFieldPointerKey) pkey;
                                 if (DEBUG_PROPERTIES) action.dump(key, true, false);
-                                action.action(key);
+                                action.action(key, objKey);
                               }
                             }
                           }
@@ -1124,6 +1126,7 @@ public abstract class AstSSAPropagationCallGraphBuilder extends SSAPropagationCa
         final boolean isLoadOperation,
         final ReflectedFieldAction action,
         final PointerKey fieldKey,
+        final PointerKey objectKey,
         final InstanceKey[] objKeys) {
       if (!isLoadOperation) {
         for (InstanceKey objKey : objKeys) {
@@ -1153,7 +1156,7 @@ public abstract class AstSSAPropagationCallGraphBuilder extends SSAPropagationCa
                                         : getPointerKeysForReflectedFieldWrite(objKey, field))) {
                               AbstractFieldPointerKey key = (AbstractFieldPointerKey) pkey;
                               if (DEBUG_PROPERTIES) action.dump(key, false, true);
-                              action.action(key);
+                              action.action(key, objectKey);
                             }
                           }
                         });
@@ -1183,7 +1186,8 @@ public abstract class AstSSAPropagationCallGraphBuilder extends SSAPropagationCa
         final boolean isLoadOperation,
         final ReflectedFieldAction action,
         final InstanceKey[] objKeys,
-        InstanceKey[] fieldsKeys) {
+        InstanceKey[] fieldsKeys,
+        PointerKey ok) {
       for (InstanceKey objKey : objKeys) {
         PointerKey objCatalog = getPointerKeyForObjectCatalog(objKey);
         for (InstanceKey fieldsKey : fieldsKeys) {
@@ -1192,7 +1196,7 @@ public abstract class AstSSAPropagationCallGraphBuilder extends SSAPropagationCa
                 Iterator2Iterable.make(getPointerKeysForReflectedFieldRead(objKey, fieldsKey))) {
               AbstractFieldPointerKey key = (AbstractFieldPointerKey) pkey;
               if (DEBUG_PROPERTIES) action.dump(key, true, true);
-              action.action(key);
+              action.action(key, ok);
             }
           } else {
             if (objCatalog != null) {
@@ -1202,7 +1206,7 @@ public abstract class AstSSAPropagationCallGraphBuilder extends SSAPropagationCa
                 Iterator2Iterable.make(getPointerKeysForReflectedFieldWrite(objKey, fieldsKey))) {
               AbstractFieldPointerKey key = (AbstractFieldPointerKey) pkey;
               if (DEBUG_PROPERTIES) action.dump(key, true, true);
-              action.action(key);
+              action.action(key, ok);
             }
           }
         }
@@ -1239,7 +1243,7 @@ public abstract class AstSSAPropagationCallGraphBuilder extends SSAPropagationCa
       }
 
       @Override
-      public void action(AbstractFieldPointerKey fieldKey) {
+      public void action(AbstractFieldPointerKey fieldKey, PointerKey objKey) {
         if (!representsNullType(fieldKey.getInstanceKey())) {
           for (InstanceKey rhsFixedValue : rhsFixedValues) {
             system.findOrCreateIndexForInstanceKey(rhsFixedValue);
@@ -1274,7 +1278,7 @@ public abstract class AstSSAPropagationCallGraphBuilder extends SSAPropagationCa
       }
 
       @Override
-      public void action(AbstractFieldPointerKey fieldKey) {
+      public void action(AbstractFieldPointerKey fieldKey, PointerKey objKey) {
         if (!representsNullType(fieldKey.getInstanceKey())) {
           system.newConstraint(fieldKey, assignOperator, rhs);
         }
@@ -1308,7 +1312,7 @@ public abstract class AstSSAPropagationCallGraphBuilder extends SSAPropagationCa
       }
 
       @Override
-      public void action(AbstractFieldPointerKey fieldKey) {
+      public void action(AbstractFieldPointerKey fieldKey, PointerKey objKey) {
         if (!representsNullType(fieldKey.getInstanceKey())) {
           system.newConstraint(lhs, assignOperator, fieldKey);
           AbstractFieldPointerKey unknown = getBuilder().fieldKeyForUnknownWrites(fieldKey);

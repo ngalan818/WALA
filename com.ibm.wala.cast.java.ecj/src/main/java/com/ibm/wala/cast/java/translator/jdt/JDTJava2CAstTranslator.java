@@ -3529,7 +3529,9 @@ public abstract class JDTJava2CAstTranslator<T extends Position> implements Tran
                 fFactory,
                 n,
                 CAstNode.LOOP,
-                visitNode(n.getExpression(), context),
+                n.getExpression() == null
+                    ? fFactory.makeConstant(true)
+                    : visitNode(n.getExpression(), context),
                 makeNode(
                     context,
                     fFactory,

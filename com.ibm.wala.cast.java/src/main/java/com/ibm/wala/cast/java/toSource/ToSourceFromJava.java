@@ -69,8 +69,9 @@ public class ToSourceFromJava extends ToSource {
                 List<SSAInstruction> chunk,
                 List<CAstNode> parentDecls,
                 Map<String, Set<String>> packages,
-                Map<SSAInstruction, Map<ISSABasicBlock, RegionTreeNode>> children) {
-              super(root, c, chunk, parentDecls, packages, children);
+                Map<SSAInstruction, Map<ISSABasicBlock, RegionTreeNode>> children,
+                boolean extraHeaderCode) {
+              super(root, c, chunk, parentDecls, packages, children, extraHeaderCode);
             }
 
             @Override
@@ -91,8 +92,10 @@ public class ToSourceFromJava extends ToSource {
               CodeGenerationContext c,
               List<SSAInstruction> chunk,
               List<CAstNode> parentDecls,
-              Map<String, Set<String>> packages) {
-            return new JavaVisitor(root, c, chunk, parentDecls, packages, children);
+              Map<String, Set<String>> packages,
+              boolean extraHeaderCode) {
+            return new JavaVisitor(
+                root, c, chunk, parentDecls, packages, children, extraHeaderCode);
           }
         };
       }
