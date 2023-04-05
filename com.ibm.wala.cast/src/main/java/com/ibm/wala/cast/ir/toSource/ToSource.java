@@ -32,6 +32,8 @@ import com.ibm.wala.cfg.Util;
 import com.ibm.wala.cfg.cdg.ControlDependenceGraph;
 import com.ibm.wala.classLoader.IMethod;
 import com.ibm.wala.core.util.strings.Atom;
+import com.ibm.wala.ipa.callgraph.CGNode;
+import com.ibm.wala.ipa.callgraph.CallGraph;
 import com.ibm.wala.ipa.cfg.ExceptionPrunedCFG;
 import com.ibm.wala.ipa.cfg.PrunedCFG;
 import com.ibm.wala.ipa.cha.IClassHierarchy;
@@ -93,6 +95,7 @@ import com.ibm.wala.util.intset.IntSetUtil;
 import com.ibm.wala.util.intset.IntegerUnionFind;
 import com.ibm.wala.util.intset.MutableIntSet;
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
 import java.io.UTFDataFormatException;
@@ -115,7 +118,9 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-public class ToSource {
+public abstract class ToSource {
+
+  protected abstract String nameToJava(String name);
 
   private static CAstPattern varDefPattern(String varName) {
     return CAstPattern.parse("DECL_STMT(VAR(\"" + varName + "\"),**)");
@@ -2084,7 +2089,7 @@ public class ToSource {
     }
   }
 
-  static class ToJavaVisitor extends CAstVisitor<CodeGenerationContext> {
+  class ToJavaVisitor extends CAstVisitor<CodeGenerationContext> {
     private final IR ir;
     private final int indent;
     private final PrintWriter out;
@@ -2192,7 +2197,7 @@ public class ToSource {
         CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
       Object v = n.getValue();
       if (v instanceof FieldReference) {
-        out.print(((FieldReference) v).getName().toString());
+        out.print(nameToJava(((FieldReference) v).getName().toString()));
       } else if (v instanceof Character) {
         out.print("'" + v + "'");
       } else if (v instanceof String) {
@@ -2206,7 +2211,7 @@ public class ToSource {
     @Override
     protected boolean visitVar(
         CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
-      out.print(n.getChild(0).getValue());
+      out.print(nameToJava(n.getChild(0).getValue().toString()));
       return true;
     }
 
@@ -2243,7 +2248,7 @@ public class ToSource {
         Atom type = target.getDeclaringClass().getName().getClassName();
         visit(n.getChild(2), c, this);
         if (n.getChild(2).getKind() != CAstNode.THIS && n.getChild(2).getKind() != CAstNode.SUPER) {
-          out.print(" = new " + type);
+          out.print(" = new " + nameToJava(type.toString()));
         }
         out.print("(");
         for (int i = 3; i < n.getChildCount(); i++) {
@@ -2255,7 +2260,7 @@ public class ToSource {
       } else if (isStatic) {
         Atom type = target.getDeclaringClass().getName().getClassName();
         Atom name = target.getName();
-        out.print(type + "." + name + "(");
+        out.print(nameToJava(type.toString()) + "." + nameToJava(name.toString()) + "(");
         for (int i = 2; i < n.getChildCount(); i++) {
           if (i != 2) {
             out.print(", ");
@@ -2419,7 +2424,7 @@ public class ToSource {
     @Override
     protected boolean visitCast(
         CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
-      out.print("(" + ((CAstType) n.getChild(0).getValue()).getName() + ") ");
+      out.print("(" + nameToJava(((CAstType) n.getChild(0).getValue()).getName()) + ") ");
       visit(n.getChild(1), c, visitor);
       return true;
     }
@@ -2442,7 +2447,7 @@ public class ToSource {
         out.print(".");
       }
       if (n.getChild(1).getValue() instanceof String) {
-        out.print(n.getChild(1).getValue());
+        out.print(nameToJava(n.getChild(1).getValue().toString()));
       } else {
         visit(n.getChild(1), c, visitor);
       }
@@ -2455,7 +2460,7 @@ public class ToSource {
       TypeReference type = (TypeReference) n.getChild(0).getValue();
       if (type.isArrayType()) {
         TypeReference eltType = type.getInnermostElementType();
-        out.print("new " + toSource(eltType));
+        out.print("new " + nameToJava(toSource(eltType).toString()));
         for (int i = 1; i < n.getChildCount(); i++) {
           out.print("[");
           visit(n.getChild(i), c, visitor);
@@ -2467,6 +2472,8 @@ public class ToSource {
       }
     }
   }
+
+  public abstract Set<File> toJava(CallGraph cg, File outDir, Predicate<CGNode> filter);
 
   public void toJava(
       IR ir,
@@ -2508,7 +2515,7 @@ public class ToSource {
           out.print(", ");
         }
         out.print(
-            toSource(m.getReference().getParameterType(i)).getName()
+            nameToJava(toSource(m.getReference().getParameterType(i)).getName())
                 + " var_"
                 + root.mergePhis.find(i + 1));
       }

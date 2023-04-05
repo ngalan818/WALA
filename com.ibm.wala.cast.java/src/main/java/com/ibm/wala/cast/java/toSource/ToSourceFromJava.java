@@ -36,6 +36,11 @@ import java.util.function.Predicate;
 public class ToSourceFromJava extends ToSource {
 
   @Override
+  protected String nameToJava(String name) {
+    return name;
+  }
+
+  @Override
   protected RegionTreeNode makeTreeNode(
       IR ir,
       IClassHierarchy cha,
@@ -104,6 +109,7 @@ public class ToSourceFromJava extends ToSource {
         ir, cha, types, cfg.getNode(1).getLastInstruction(), cfg.getNode(2));
   }
 
+  @Override
   public Set<File> toJava(CallGraph cg, File outDir, Predicate<CGNode> filter) {
     Map<IMethod, IR> code = HashMapFactory.make();
     cg.forEach(
@@ -116,35 +122,40 @@ public class ToSourceFromJava extends ToSource {
     Set<File> files = HashSetFactory.make();
     for (IClass cls : cg.getClassHierarchy()) {
       if (cls instanceof AstClass) {
-        String clsName = cls.getName().toString().substring(1);
+        String clsName = nameToJava(cls.getName().toString().substring(1));
         File f = new File(outDir, clsName + ".java");
         Set<Pair<String, String>> seen = HashSetFactory.make();
         try (PrintWriter all = new PrintWriter(new FileWriter(f))) {
           try (ByteArrayOutputStream bs = new ByteArrayOutputStream()) {
             try (PrintWriter out = new PrintWriter(bs)) {
-              out.println("public class " + clsName + " {");
+              out.println("public class " + nameToJava(clsName) + " {");
               for (IField fr : cls.getDeclaredStaticFields()) {
                 out.println(
                     "  static "
-                        + toSource(fr.getFieldTypeReference()).getName()
+                        + nameToJava(toSource(fr.getFieldTypeReference()).getName())
                         + " "
-                        + fr.getName()
+                        + nameToJava(fr.getName().toString())
                         + ";");
               }
               for (IField fr : cls.getDeclaredInstanceFields()) {
                 out.println(
-                    toSource(fr.getFieldTypeReference()).getName() + " " + fr.getName() + ";");
+                    nameToJava(toSource(fr.getFieldTypeReference()).getName())
+                        + " "
+                        + nameToJava(fr.getName().toString())
+                        + ";");
               }
               for (IMethod m : cls.getDeclaredMethods()) {
                 if (code.containsKey(m)) {
-                  for (TypeReference e : m.getDeclaredExceptions()) {
-                    Pair<String, String> key =
-                        Pair.make(
-                            e.getName().getPackage().toString().replace('/', '.'),
-                            e.getName().getClassName().toString());
-                    if (!seen.contains(key)) {
-                      seen.add(key);
-                      all.println("import " + key.fst + "." + key.snd + ";");
+                  if (m.getDeclaredExceptions() != null) {
+                    for (TypeReference e : m.getDeclaredExceptions()) {
+                      Pair<String, String> key =
+                          Pair.make(
+                              e.getName().getPackage().toString().replace('/', '.'),
+                              e.getName().getClassName().toString());
+                      if (!seen.contains(key)) {
+                        seen.add(key);
+                        all.println("import " + key.fst + "." + key.snd + ";");
+                      }
                     }
                   }
                   IR ir = code.get(m);
