@@ -181,7 +181,7 @@ public class RhinoToAstTranslator implements TranslatorToCAst {
 
     @Override
     public WalkContext getParent() {
-      return (WalkContext) super.getParent();
+      return super.getParent();
     }
 
     BreakContext(WalkContext parent, Node breakTo, String label) {
@@ -198,7 +198,7 @@ public class RhinoToAstTranslator implements TranslatorToCAst {
 
     @Override
     public WalkContext getParent() {
-      return (WalkContext) super.getParent();
+      return super.getParent();
     }
   }
 

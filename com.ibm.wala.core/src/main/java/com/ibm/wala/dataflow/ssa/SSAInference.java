@@ -43,7 +43,9 @@ public abstract class SSAInference<T extends IVariable<T>> extends DefaultFixedP
   private SymbolTable symbolTable;
 
   /** Dataflow variables, one for each value in the symbol table. */
-  private List<IVariable<T>> vars;
+  protected List<IVariable<T>> vars;
+
+  protected VariableFactory<T> varFactory;
 
   public interface OperatorFactory<T extends IVariable<T>> {
     /**
@@ -69,6 +71,7 @@ public abstract class SSAInference<T extends IVariable<T>> extends DefaultFixedP
 
     this.ir = ir;
     this.symbolTable = ir.getSymbolTable();
+    this.varFactory = varFactory;
 
     createVariables(varFactory);
     createEquations(opFactory);
@@ -121,6 +124,12 @@ public abstract class SSAInference<T extends IVariable<T>> extends DefaultFixedP
     vars.add(null);
     for (int i = 1; i < varsCount; i++) {
       vars.add(factory.makeVariable(i));
+    }
+  }
+
+  public void ensureVariable(int toV) {
+    if (toV >= vars.size()) {
+      vars.add(toV, varFactory.makeVariable(toV));
     }
   }
 

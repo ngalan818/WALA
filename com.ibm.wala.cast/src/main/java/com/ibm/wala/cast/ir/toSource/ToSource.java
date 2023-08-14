@@ -120,15 +120,19 @@ import java.util.stream.Stream;
 
 public abstract class ToSource {
 
+  private final CAst ast = new CAstImpl();
+
   protected abstract String nameToJava(String name);
 
-  private static CAstPattern varDefPattern(String varName) {
-    return CAstPattern.parse("DECL_STMT(VAR(\"" + varName + "\"),**)");
+  private static CAstPattern varDefPattern(CAstNode varName) {
+    return CAstPattern.parse("DECL_STMT(VAR(\"" + varName.getValue() + "\"),**)");
   }
 
-  private static CAstPattern varUsePattern(String varName) {
-    return CAstPattern.parse("VAR(\"" + varName + "\")");
+  private static CAstPattern varUsePattern(CAstNode varName) {
+    return CAstPattern.parse("VAR(\"" + varName.getValue() + "\")");
   }
+
+  private static CAstPattern isNot = CAstPattern.parse("UNARY_EXPR(|(OPERATOR(\"!\")||\"!\")|,*)");
 
   private static boolean deemedFunctional(
       SSAInstruction inst, List<SSAInstruction> regionInsts, IClassHierarchy cha) {
@@ -150,7 +154,8 @@ public abstract class ToSource {
           || (targetClass == TypeReference.JavaLangFloat)
           || (targetClass == TypeReference.JavaLangDouble)
           || (targetClass == TypeReference.JavaLangMath)
-          || (targetClass == TypeReference.JavaLangString)) {
+          || (targetClass == TypeReference.JavaLangString)
+          || (targetClass == TypeReference.JavaUtilRegexPattern)) {
         return true;
       }
     } else if (inst instanceof SSAGetInstruction) {
@@ -492,12 +497,20 @@ public abstract class ToSource {
       return mergePhis;
     }
 
+    private int parentPrecedence;
     private final TypeInference types;
     private final IntegerUnionFind mergePhis;
 
     public CodeGenerationContext(TypeInference types, IntegerUnionFind mergePhis) {
       this.types = types;
       this.mergePhis = mergePhis;
+      this.parentPrecedence = Integer.MAX_VALUE;
+    }
+
+    public CodeGenerationContext(CodeGenerationContext parent, int precedence) {
+      this.types = parent.types;
+      this.mergePhis = parent.mergePhis;
+      this.parentPrecedence = precedence;
     }
 
     @Override
@@ -532,7 +545,9 @@ public abstract class ToSource {
     private final SSAInstruction r;
     private final ISSABasicBlock l;
     private final ControlDependenceGraph<ISSABasicBlock> cdg;
+    private final IR ir;
     private BasicNaturalRelation livenessConflicts;
+    private final Map<Integer, String> sourceNames;
     protected final Map<SSAInstruction, Map<ISSABasicBlock, RegionTreeNode>> children =
         HashMapFactory.make();
 
@@ -597,6 +612,8 @@ public abstract class ToSource {
       this.cdg = parent.cdg;
       this.packages = parent.packages;
       this.loops = parent.loops;
+      this.ir = parent.ir;
+      this.sourceNames = parent.sourceNames;
       initChildren();
       System.err.println("added children for " + r + "," + l + ": " + children);
     }
@@ -627,12 +644,46 @@ public abstract class ToSource {
       return -1;
     }
 
+    private String toSourceName(int vn) {
+      vn = mergePhis.find(vn);
+      String name = "var_" + vn;
+      SSAInstruction def = du.getDef(vn);
+      if (def != null) {
+        String[] names = ir.getLocalNames(def.iIndex(), vn);
+        if (names != null && names.length > 0) {
+          name = names[0];
+        }
+      }
+      return name;
+    }
+
+    private Map<Integer, String> makeNames() {
+      Map<Integer, String> names = HashMapFactory.make();
+      Map<String, Integer> offsets = HashMapFactory.make();
+      for (int i = 1; i <= ST.getMaxValueNumber(); i++) {
+        String nm = toSourceName(i);
+        if (offsets.containsKey(nm)) {
+          int v = offsets.get(nm);
+          if (v != mergePhis.find(i)) {
+            nm = nm + "_" + mergePhis.find(i);
+          }
+        } else {
+          offsets.put(nm, mergePhis.find(i));
+        }
+        names.put(i, nm);
+      }
+      return names;
+    }
+
     public RegionTreeNode(
         IR ir, IClassHierarchy cha, TypeInference types, SSAInstruction r, ISSABasicBlock l) {
       this.r = r;
       this.l = l;
+      this.ir = ir;
       this.cha = cha;
       this.types = types;
+      this.ST = ir.getSymbolTable();
+
       du = new DefUse(ir);
       cfg = ExceptionPrunedCFG.makeUncaught(ir.getControlFlowGraph());
       packages = HashMapFactory.make();
@@ -828,7 +879,6 @@ public abstract class ToSource {
         }
       }
 
-      ST = ir.getSymbolTable();
       mergedValues = IntSetUtil.make();
       mergePhis = new IntegerUnionFind(ST.getMaxValueNumber());
       ir.getControlFlowGraph()
@@ -864,6 +914,9 @@ public abstract class ToSource {
                           }
                         });
               });
+
+      this.sourceNames = makeNames();
+
       regions = HashMapFactory.make();
       linePhis = HashMapFactory.make();
       cdg.forEach(
@@ -969,6 +1022,7 @@ public abstract class ToSource {
                                                           .intIterator()
                                                           .next();
                                                   ir.getSymbolTable().ensureSymbol(tmp);
+                                                  types.copyType(mergePhis.find(rv), tmp);
                                                   as.add(
                                                       0,
                                                       new AssignInstruction(
@@ -984,6 +1038,7 @@ public abstract class ToSource {
                                                           .intIterator()
                                                           .next();
                                                 }
+                                                types.copyType(rh, lh);
                                                 AssignInstruction assign =
                                                     new AssignInstruction(
                                                         bb.getLastInstructionIndex() + 1, lh, rh);
@@ -1335,8 +1390,7 @@ public abstract class ToSource {
                         CAstNode.EXPR_STMT,
                         ast.makeNode(
                             CAstNode.ASSIGN,
-                            ast.makeNode(
-                                CAstNode.VAR, ast.makeConstant("var_" + mergePhis.find(def))),
+                            ast.makeNode(CAstNode.VAR, ast.makeConstant(sourceNames.get(def))),
                             val));
               } else {
                 CAstNode val = node;
@@ -1349,7 +1403,7 @@ public abstract class ToSource {
                 node =
                     ast.makeNode(
                         CAstNode.DECL_STMT,
-                        ast.makeNode(CAstNode.VAR, ast.makeConstant("var_" + mergePhis.find(def))),
+                        ast.makeNode(CAstNode.VAR, ast.makeConstant(sourceNames.get(def))),
                         ast.makeConstant(type),
                         val);
               }
@@ -1359,7 +1413,10 @@ public abstract class ToSource {
 
         private boolean checkDecls(int def, List<CAstNode> decls) {
           return decls.stream()
-              .noneMatch(d -> varDefPattern("var_" + mergePhis.find(def)).match(d, null));
+              .noneMatch(
+                  d ->
+                      varDefPattern(ast.makeConstant(sourceNames.get(mergePhis.find(def))))
+                          .match(d, null));
         }
 
         private boolean checkDecl(int def) {
@@ -1377,13 +1434,12 @@ public abstract class ToSource {
             return ast.makeConstant(value);
           } else if (ST.getNumberOfParameters() >= vn) {
             if (cfg.getMethod().isStatic()) {
-              return ast.makeNode(CAstNode.VAR, ast.makeConstant("var_" + mergePhis.find(vn)));
+              return ast.makeNode(CAstNode.VAR, ast.makeConstant(sourceNames.get(vn)));
             } else {
               if (vn == 1) {
                 return ast.makeNode(CAstNode.THIS);
               } else {
-                return ast.makeNode(
-                    CAstNode.VAR, ast.makeConstant("var_" + mergePhis.find(vn - 1)));
+                return ast.makeNode(CAstNode.VAR, ast.makeConstant(sourceNames.get(vn)));
               }
             }
           } else {
@@ -1400,7 +1456,7 @@ public abstract class ToSource {
                   decls.add(
                       ast.makeNode(
                           CAstNode.DECL_STMT,
-                          ast.makeNode(CAstNode.VAR, ast.makeConstant("var_" + mergePhis.find(vn))),
+                          ast.makeNode(CAstNode.VAR, ast.makeConstant(sourceNames.get(vn))),
                           ast.makeConstant(toSource(c.getTypes().getType(vn).getTypeReference()))));
                 }
 
@@ -1408,13 +1464,13 @@ public abstract class ToSource {
                     CAstNode.BLOCK_EXPR,
                     ast.makeNode(
                         CAstNode.ASSIGN,
-                        ast.makeNode(CAstNode.VAR, ast.makeConstant("var_" + mergePhis.find(vn))),
+                        ast.makeNode(CAstNode.VAR, ast.makeConstant(sourceNames.get(vn))),
                         node));
               } else {
                 return node;
               }
             } else {
-              return ast.makeNode(CAstNode.VAR, ast.makeConstant("var_" + mergePhis.find(vn)));
+              return ast.makeNode(CAstNode.VAR, ast.makeConstant(sourceNames.get(vn)));
             }
           }
         }
@@ -1522,6 +1578,17 @@ public abstract class ToSource {
               case STRICT_NE:
                 op = CAstOperator.OP_NE;
                 break;
+              case EXP:
+                node =
+                    ast.makeNode(
+                        CAstNode.CALL,
+                        ast.makeConstant(
+                            MethodReference.findOrCreate(
+                                TypeReference.JavaLangMath, "pow", "(DD)D")),
+                        ast.makeConstant(true),
+                        left,
+                        right);
+                return;
               default:
                 break;
             }
@@ -1546,12 +1613,25 @@ public abstract class ToSource {
           node = ast.makeNode(CAstNode.UNARY_EXPR, op, arg);
         }
 
+        private final MethodReference iv =
+            MethodReference.findOrCreate(
+                TypeReference.JavaLangInteger, "valueOf", "(Ljava/lang/String;)I");
+
         @Override
         public void visitConversion(SSAConversionInstruction instruction) {
           CAstNode value = visit(instruction.getUse(0));
-          node =
-              ast.makeNode(
-                  CAstNode.CAST, ast.makeConstant(toSource(instruction.getToType())), value);
+          if (instruction.getFromType() == TypeReference.JavaLangString) {
+            if (instruction.getToType() == TypeReference.Int) {
+              node =
+                  ast.makeNode(CAstNode.CALL, ast.makeConstant(iv), ast.makeConstant(true), value);
+            } else {
+              assert false : instruction;
+            }
+          } else {
+            node =
+                ast.makeNode(
+                    CAstNode.CAST, ast.makeConstant(toSource(instruction.getToType())), value);
+          }
         }
 
         @Override
@@ -2101,7 +2181,11 @@ public abstract class ToSource {
     }
 
     private void indent() {
-      for (int i = 0; i < indent; i++) {
+      indent(0);
+    }
+
+    private void indent(int offset) {
+      for (int i = 0; i < indent - offset; i++) {
         out.print("  ");
       }
     }
@@ -2168,22 +2252,37 @@ public abstract class ToSource {
       try (ByteArrayOutputStream b = new ByteArrayOutputStream()) {
         try (PrintWriter bw = new PrintWriter(b)) {
 
-          ToJavaVisitor cv = new ToJavaVisitor(indent + 1, ir, bw);
+          int len = b.toString().trim().length();
+          int count = 0;
+          ToJavaVisitor cv = new ToJavaVisitor(indent, ir, bw);
           for (CAstNode child : n.getChildren()) {
             if (child.getKind() != CAstNode.EMPTY) {
               cv.visit(child, c, cv);
+              bw.flush();
+              int ln = b.toString().trim().length();
+              if (ln > len) count++;
+              len = ln;
             }
           }
 
-          bw.flush();
           String javaText = b.toString();
 
-          if (javaText.length() > 0) {
-            indent();
-            out.println("{");
-            out.println(javaText);
-            indent();
-            out.println("}");
+          String trimmedCode = javaText.trim();
+          if (trimmedCode.length() > 0) {
+            if (count > 1) {
+              indent(1);
+              out.println("{");
+            }
+            if (count <= 1) {
+              indent(trimmedCode.startsWith("{") ? 1 : 0);
+              out.println(trimmedCode);
+            } else {
+              out.print(javaText);
+            }
+            if (count > 1) {
+              indent(1);
+              out.println("}");
+            }
           }
         }
       } catch (IOException e) {
@@ -2201,7 +2300,12 @@ public abstract class ToSource {
       } else if (v instanceof Character) {
         out.print("'" + v + "'");
       } else if (v instanceof String) {
-        out.print('"' + (String) v + '"');
+        String s = (String) v;
+        if (s.startsWith("\"") && s.endsWith("\"")) {
+          out.print(s);
+        } else {
+          out.print('"' + s + '"');
+        }
       } else {
         out.print(v);
       }
@@ -2211,7 +2315,8 @@ public abstract class ToSource {
     @Override
     protected boolean visitVar(
         CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
-      out.print(nameToJava(n.getChild(0).getValue().toString()));
+      String nm = n.getChild(0).getValue().toString();
+      out.print(nameToJava(nm));
       return true;
     }
 
@@ -2309,7 +2414,7 @@ public abstract class ToSource {
       ToJavaVisitor cv = new ToJavaVisitor(indent + 1, ir, out);
       indent();
       out.print("while (");
-      cv.visit(n.getChild(0), c, cv);
+      cv.visit(n.getChild(0), c, visitor);
       out.println(")");
       cv.visit(n.getChild(1), c, cv);
       return true;
@@ -2318,11 +2423,9 @@ public abstract class ToSource {
     @Override
     protected boolean visitIfStmt(
         CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
-      ToJavaVisitor cv = new ToJavaVisitor(indent + 1, ir, out);
-      indent();
-      out.print("if (");
-      cv.visit(n.getChild(0), c, cv);
-      out.println(")");
+
+      String thenJavaText = "";
+      String elseJavaText = "";
 
       try (ByteArrayOutputStream b = new ByteArrayOutputStream()) {
         try (PrintWriter bw = new PrintWriter(b)) {
@@ -2331,39 +2434,66 @@ public abstract class ToSource {
           cthen.visit(n.getChild(1), c, cthen);
 
           bw.flush();
-          String javaText = b.toString();
+          thenJavaText = b.toString();
 
-          if (javaText.length() > 0) {
-            out.println(javaText);
-          } else {
-            indent();
-            out.println(" {}");
+          if (n.getChildCount() > 2) {
+            try (ByteArrayOutputStream eb = new ByteArrayOutputStream()) {
+              try (PrintWriter ebw = new PrintWriter(eb)) {
+
+                ToJavaVisitor celse = new ToJavaVisitor(indent + 1, ir, ebw);
+                celse.visit(n.getChild(2), c, celse);
+
+                ebw.flush();
+                elseJavaText = eb.toString();
+              }
+            }
           }
         }
       } catch (IOException e) {
         assert false : e;
       }
 
-      if (n.getChildCount() > 2) {
-        try (ByteArrayOutputStream b = new ByteArrayOutputStream()) {
-          try (PrintWriter bw = new PrintWriter(b)) {
+      boolean reverse = CAstPattern.match(isNot, n.getChild(0)) != null;
 
-            ToJavaVisitor celse = new ToJavaVisitor(indent + 1, ir, bw);
-            celse.visit(n.getChild(2), c, celse);
+      indent();
+      if (thenJavaText.length() > 0) {
+        if (elseJavaText.length() > 0) {
+          ToJavaVisitor cif = new ToJavaVisitor(indent + 1, ir, out);
+          out.print("if (");
+          cif.visit(reverse ? n.getChild(0).getChild(1) : n.getChild(0), c, cif);
+          out.println(")");
+          out.print(reverse ? elseJavaText : thenJavaText);
+          indent();
+          out.println("else");
+          out.print(reverse ? thenJavaText : elseJavaText);
 
-            bw.flush();
-            String javaText = b.toString();
+        } else {
+          ToJavaVisitor cif = new ToJavaVisitor(indent + 1, ir, out);
+          out.print("if (");
+          cif.visit(n.getChild(0), c, cif);
+          out.println(")");
+          out.print(thenJavaText);
+        }
+      } else {
+        if (elseJavaText.length() > 0) {
+          ToJavaVisitor cif = new ToJavaVisitor(indent + 1, ir, out);
+          out.print("if (");
+          cif.visit(
+              reverse
+                  ? n.getChild(0).getChild(1)
+                  : ast.makeNode(CAstNode.UNARY_EXPR, CAstOperator.OP_NOT, n.getChild(0)),
+              c,
+              cif);
+          out.println(")");
+          out.print(elseJavaText);
 
-            if (javaText.length() > 0) {
-              indent();
-              out.println("else");
-              out.println(javaText);
-            }
-          }
-        } catch (IOException e) {
-          assert false : e;
+        } else {
+          ToJavaVisitor cif = new ToJavaVisitor(indent + 1, ir, out);
+          cif.visit(n.getChild(0), c, cif);
+          out.println(";");
         }
       }
+
       return true;
     }
 
@@ -2402,22 +2532,52 @@ public abstract class ToSource {
       return true;
     }
 
+    protected int precedence(String operator) {
+      switch (operator) {
+        case "**":
+          return 0;
+        case "!":
+          return 1;
+        case "%":
+        case "*":
+        case "/":
+          return 3;
+        case "+":
+        case "-":
+          return 5;
+        case "==":
+        case ">":
+          return 7;
+        default:
+          assert false : "unknown " + operator;
+          return -1;
+      }
+    }
+
     @Override
     protected boolean visitBinaryExpr(
         CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
-      out.print("(");
-      visit(n.getChild(1), c, this);
+      int myPrecedence = precedence(n.getChild(0).getValue().toString());
+      CodeGenerationContext cc = new CodeGenerationContext(c, myPrecedence);
+      boolean parens = c.parentPrecedence < myPrecedence;
+      if (parens) out.print("(");
+      visit(n.getChild(1), cc, this);
       out.print(" " + n.getChild(0).getValue() + " ");
-      visit(n.getChild(2), c, this);
-      out.print(")");
+      visit(n.getChild(2), cc, this);
+      if (parens) out.print(")");
       return true;
     }
 
     @Override
     protected boolean visitUnaryExpr(
         CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
+      int myPrecedence = precedence(n.getChild(0).getValue().toString());
+      CodeGenerationContext cc = new CodeGenerationContext(c, myPrecedence);
+      boolean parens = c.parentPrecedence < myPrecedence;
+      if (parens) out.print("(");
       out.print(n.getChild(0).getValue() + " ");
-      visit(n.getChild(1), c, this);
+      visit(n.getChild(1), cc, this);
+      if (parens) out.print(")");
       return true;
     }
 
@@ -2510,14 +2670,15 @@ public abstract class ToSource {
         out.print(toSource(m.getReturnType()).getName() + " " + m.getName() + "(");
       }
       for (int i = 0; i < m.getReference().getNumberOfParameters(); i++) {
-        done.add(root.mergePhis.find(i + 1));
+        done.add(root.mergePhis.find(i + (m.isStatic() ? 1 : 2)));
         if (i != 0) {
           out.print(", ");
         }
+
         out.print(
             nameToJava(toSource(m.getReference().getParameterType(i)).getName())
-                + " var_"
-                + root.mergePhis.find(i + 1));
+                + " "
+                + root.toSourceName(root.mergePhis.find(i + (m.isStatic() ? 1 : 2))));
       }
       out.print(") ");
       try {
@@ -2572,18 +2733,21 @@ public abstract class ToSource {
       inits.add(ast.getChild(0));
     }
 
+    ToJavaVisitor toJava = new ToJavaVisitor(level, ir, out);
+
     for (int vn = ir.getSymbolTable().getNumberOfParameters() + 1;
         vn <= ir.getSymbolTable().getMaxValueNumber();
         vn++) {
-      if (!done.contains(vn)
-          && !CAstPattern.findAll(varUsePattern("var_" + vn), ast).isEmpty()
-          && CAstPattern.findAll(varDefPattern("var_" + vn), ast).isEmpty()) {
+      CAstNode srcName = cast.makeConstant(root.sourceNames.get(vn));
+      if (!done.contains(root.mergePhis.find(vn))
+          && !CAstPattern.findAll(varUsePattern(srcName), ast).isEmpty()
+          && CAstPattern.findAll(varDefPattern(srcName), ast).isEmpty()) {
         System.err.println("found " + vn);
-        done.add(vn);
+        done.add(root.mergePhis.find(vn));
         inits.add(
             cast.makeNode(
                 CAstNode.DECL_STMT,
-                cast.makeNode(CAstNode.VAR, cast.makeConstant("var_" + vn)),
+                cast.makeNode(CAstNode.VAR, srcName),
                 cast.makeConstant(toSource(types.getType(vn).getTypeReference()))));
       }
     }
@@ -2594,7 +2758,6 @@ public abstract class ToSource {
 
     ast = cast.makeNode(CAstNode.BLOCK_STMT, inits);
 
-    ToJavaVisitor toJava = new ToJavaVisitor(level, ir, out);
     toJava.visit(ast, new CodeGenerationContext(types, root.mergePhis), toJava);
   }
 

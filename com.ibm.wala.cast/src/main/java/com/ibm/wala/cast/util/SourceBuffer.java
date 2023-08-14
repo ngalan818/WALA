@@ -146,7 +146,7 @@ public class SourceBuffer {
           startColumn = p.getFirstCol();
         }
 
-        while (p.getLastOffset() >= 0 ? p.getLastOffset() >= offset : p.getLastLine() >= line) {
+        while (p.getLastOffset() >= 0 ? p.getLastOffset() > offset : p.getLastLine() > line) {
           currentLine = reader.readLine();
 
           if (currentLine == null) {

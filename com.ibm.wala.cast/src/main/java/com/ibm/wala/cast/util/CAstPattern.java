@@ -311,7 +311,7 @@ public class CAstPattern {
       default:
         if ((value == null)
             ? tree.getKind() != kind
-            : (tree.getKind() != CAstNode.CONSTANT
+            : ((tree.getKind() != CAstNode.CONSTANT && tree.getKind() != CAstNode.OPERATOR)
                 || (value instanceof Pattern
                     ? !((Pattern) value).matcher(tree.getValue().toString()).matches()
                     : !value.equals(tree.getValue().toString())))) {

@@ -102,8 +102,8 @@ public interface JavaScriptTranslatorToCAst extends TranslatorToCAst {
     private final Vector<CAstNode> initializers = new Vector<>();
 
     @Override
-    public WalkContext<C, T> getParent() {
-      return (WalkContext<C, T>) super.getParent();
+    public C getParent() {
+      return super.getParent();
     }
 
     protected FunctionContext(C parent, T s) {

@@ -41,6 +41,7 @@ public class TypeVariable extends AbstractVariable<TypeVariable> {
   }
 
   public void setType(TypeAbstraction type) {
+    assert type != null;
     this.type = type;
   }
 

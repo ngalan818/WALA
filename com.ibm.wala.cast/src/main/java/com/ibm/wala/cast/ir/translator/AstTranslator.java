@@ -3797,7 +3797,9 @@ public abstract class AstTranslator extends CAstVisitor<AstTranslator.WalkContex
 
   @Override
   protected void leaveLocalScope(CAstNode n, WalkContext c, CAstVisitor<WalkContext> visitor) {
-    c.setValue(n, c.getValue(n.getChild(0)));
+    if (c.getValue(n.getChild(0)) != -1) {
+      c.setValue(n, c.getValue(n.getChild(0)));
+    }
   }
 
   @Override

@@ -161,6 +161,7 @@ public class ToSourceFromJava extends ToSource {
                   IR ir = code.get(m);
                   AstJavaTypeInference types = new AstJavaTypeInference(ir, true);
                   types.solve();
+                  System.err.println(types);
                   toJava(
                       ir,
                       cg.getClassHierarchy(),

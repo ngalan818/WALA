@@ -717,6 +717,13 @@ public class TypeInference extends SSAInference<TypeVariable> implements FixedPo
     return ir;
   }
 
+  public void copyType(int fromVn, int toVn) {
+    ensureVariable(toVn);
+    TypeVariable fromV = getVariable(fromVn);
+    TypeVariable toV = getVariable(toVn);
+    toV.copyState(fromV);
+  }
+
   /** Return the type computed for a particular value number */
   public TypeAbstraction getType(int valueNumber) {
     if (valueNumber < 0) {

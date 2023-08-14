@@ -391,6 +391,12 @@ public final class TypeReference implements Serializable {
   public static final TypeReference JavaUtilVector =
       findOrCreate(ClassLoaderReference.Primordial, JavaUtilVectorName);
 
+  private static final TypeName JavaUtilRegexPatternName =
+      TypeName.string2TypeName("Ljava/util/regex/Pattern");
+
+  public static final TypeReference JavaUtilRegexPattern =
+      findOrCreate(ClassLoaderReference.Primordial, JavaUtilRegexPatternName);
+
   public static final byte ClassTypeCode = 'L';
 
   public static final byte ArrayTypeCode = '[';

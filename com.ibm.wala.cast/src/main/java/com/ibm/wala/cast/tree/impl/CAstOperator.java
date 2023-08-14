@@ -47,7 +47,7 @@ public class CAstOperator implements CAstLeafNode {
   }
 
   @Override
-  public Object getValue() {
+  public String getValue() {
     return op;
   }
 
@@ -86,4 +86,5 @@ public class CAstOperator implements CAstLeafNode {
   public static final CAstOperator OP_REL_XOR = new CAstOperator("^^");
   public static final CAstOperator OP_IN = new CAstOperator("in");
   public static final CAstOperator OP_NOT_IN = new CAstOperator("not in");
+  public static final CAstOperator OP_EXP = new CAstOperator("**");
 }

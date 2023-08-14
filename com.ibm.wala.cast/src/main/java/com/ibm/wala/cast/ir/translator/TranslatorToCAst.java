@@ -192,7 +192,7 @@ public interface TranslatorToCAst {
     }
 
     @Override
-    public WalkContext<C, T> getParent() {
+    public C getParent() {
       return parent;
     }
   }
