@@ -161,7 +161,7 @@ public class ECJSourceModuleProcessor implements CAstGenerator {
 
     Pair<String[], String[]> paths = computeClassPath(scope);
     sources = paths.fst;
-    libs = paths.snd;
+    libs = paths.snd == null || paths.snd.length < 1 ? null : paths.snd;
 
     this.exclusions = scope.getExclusions();
   }
@@ -198,6 +198,10 @@ public class ECJSourceModuleProcessor implements CAstGenerator {
         }
         cl = cl.getParent();
       }
+    }
+
+    if (libs.isEmpty()) {
+      libs.add("/Library/Java/JavaVirtualMachines/jdk1.8.0_311.jdk/Contents/Home/jre/lib/rt.jar");
     }
 
     return Pair.make(sources.toArray(new String[0]), libs.toArray(new String[0]));
@@ -242,8 +246,8 @@ public class ECJSourceModuleProcessor implements CAstGenerator {
     parser.setResolveBindings(true);
     parser.setEnvironment(libs, this.sources, null, true);
     Hashtable<String, String> options = JavaCore.getOptions();
-    options.put(JavaCore.COMPILER_SOURCE, "11");
-    options.put(JavaCore.COMPILER_COMPLIANCE, "11");
+    options.put(JavaCore.COMPILER_SOURCE, "1.8");
+    options.put(JavaCore.COMPILER_COMPLIANCE, "1.8");
     parser.setCompilerOptions(options);
     parser.createASTs(
         sourceFiles, null, new String[0], xlator.apply(sourceMap), new NullProgressMonitor());
