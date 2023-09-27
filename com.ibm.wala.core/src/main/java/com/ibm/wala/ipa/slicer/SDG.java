@@ -47,6 +47,7 @@ import java.util.HashSet;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Stream;
 
 /**
  * System dependence graph.
@@ -248,6 +249,12 @@ public class SDG<T extends InstanceKey> extends AbstractNumberedGraph<Statement>
     public Iterator<Statement> iterator() {
       eagerConstruction();
       return super.iterator();
+    }
+
+    @Override
+    public Stream<Statement> stream() {
+      eagerConstruction();
+      return super.stream();
     }
 
     /**
