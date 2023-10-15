@@ -10,6 +10,6 @@
  */
 package com.ibm.wala.ipa.slicer;
 
-public interface ValueNumberCarrier {
+public interface  ValueNumberCarrier {
   int getValueNumber();
 }
