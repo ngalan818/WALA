@@ -1513,12 +1513,15 @@ public abstract class JDTJava2CAstTranslator<T extends Position> implements Tran
     Expression init = n.getInitializer();
     CAstNode initNode;
 
+    Object o;
     String t = type.getBinaryName();
     if (init == null) {
       if (JDT2CAstUtils.isLongOrLess(type)) // doesn't include boolean
       initNode = fFactory.makeConstant(0);
       else if (t.equals("D") || t.equals("F")) initNode = fFactory.makeConstant(0.0);
       else initNode = fFactory.makeConstant(null);
+    } else if ((o = init.resolveConstantExpressionValue()) != null) {
+      initNode = fFactory.makeConstant(o);
     } else initNode = visitNode(init, context);
 
     Object defaultValue = JDT2CAstUtils.defaultValueForType(type);
@@ -1750,7 +1753,12 @@ public abstract class JDTJava2CAstTranslator<T extends Position> implements Tran
   }
 
   private CAstNode visit(ExpressionStatement n, WalkContext context) {
-    return visitNode(n.getExpression(), context);
+    Object o = n.getExpression().resolveConstantExpressionValue();
+    if (o != null) {
+      return fFactory.makeConstant(o);
+    } else {
+      return visitNode(n.getExpression(), context);
+    }
   }
 
   private CAstNode visit(SuperMethodInvocation n, WalkContext context) {
