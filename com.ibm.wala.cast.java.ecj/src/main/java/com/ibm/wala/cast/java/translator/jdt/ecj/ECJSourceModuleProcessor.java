@@ -201,9 +201,10 @@ public class ECJSourceModuleProcessor implements CAstGenerator {
     }
 
     if (libs.isEmpty()) {
-      libs.add("/Library/Java/JavaVirtualMachines/jdk1.8.0_311.jdk/Contents/Home/jre/lib/rt.jar");
+      libs.add("D:/tmp/JD-rt.jar");
+      assert new File("D:/tmp/JD-rt.jar").exists();
+      System.out.println(libs);
     }
-
     return Pair.make(sources.toArray(new String[0]), libs.toArray(new String[0]));
   }
 
