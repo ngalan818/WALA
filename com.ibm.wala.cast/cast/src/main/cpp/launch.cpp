@@ -1,5 +1,6 @@
 #include <cstdio>
- #include <jni.h>
+typedef long long __int64;
+#include <jni.h>
 #include <string>
 #include "Exceptions.h"
 #include "CAstWrapper.h"

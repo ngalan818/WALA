@@ -1,6 +1,7 @@
 #include <CAstWrapper.h>
 #include <cstring>
 #include <iterator>
+typedef long long __int64;
 #include <jni.h>
 #include <sstream>
 #include <string>

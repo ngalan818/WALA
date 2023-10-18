@@ -3,6 +3,7 @@
 
 #include <list>
 #include "dll_export.h"
+typedef long long __int64;
 #include "jni.h"
 #include "Exceptions.h"
 #include "launch.h"
