@@ -90,4 +90,12 @@ public class ConstantValue implements Value {
   public int hashCode() {
     return constant == null ? 74 : 91 * constant.hashCode();
   }
+
+  public boolean hashPosition() {
+    return getPosition() == SymbolTable.NO_POSITION;
+  }
+
+  public Object getPosition() {
+    return SymbolTable.NO_POSITION;
+  }
 }

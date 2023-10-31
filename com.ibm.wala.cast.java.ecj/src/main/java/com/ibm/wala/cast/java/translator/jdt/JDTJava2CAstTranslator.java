@@ -1522,6 +1522,7 @@ public abstract class JDTJava2CAstTranslator<T extends Position> implements Tran
       else initNode = fFactory.makeConstant(null);
     } else if ((o = init.resolveConstantExpressionValue()) != null) {
       initNode = fFactory.makeConstant(o);
+      setPos(context, initNode, init);
     } else initNode = visitNode(init, context);
 
     Object defaultValue = JDT2CAstUtils.defaultValueForType(type);
@@ -2145,16 +2146,22 @@ public abstract class JDTJava2CAstTranslator<T extends Position> implements Tran
     return visitNode(n.getExpression(), context);
   }
 
-  private CAstNode visit(BooleanLiteral n) {
-    return fFactory.makeConstant(n.booleanValue());
+  private CAstNode visit(BooleanLiteral n, WalkContext context) {
+    CAstNode str = fFactory.makeConstant(n.booleanValue());
+    setPos(context, str, n);
+    return str;
   }
 
-  private CAstNode visit(CharacterLiteral n) {
-    return fFactory.makeConstant(n.charValue());
+  private CAstNode visit(CharacterLiteral n, WalkContext context) {
+    CAstNode str = fFactory.makeConstant(n.charValue());
+    setPos(context, str, n);
+    return str;
   }
 
-  private CAstNode visit() {
-    return fFactory.makeConstant(null);
+  private CAstNode visit(NullLiteral n, WalkContext context) {
+    CAstNode str = fFactory.makeConstant(null);
+    setPos(context, str, n);
+    return str;
   }
 
   private CAstNode visit(StringLiteral n, WalkContext context) {
@@ -3847,7 +3854,7 @@ public abstract class JDTJava2CAstTranslator<T extends Position> implements Tran
     } else if (n instanceof Block) {
       return visit((Block) n, context);
     } else if (n instanceof BooleanLiteral) {
-      return visit((BooleanLiteral) n);
+      return visit((BooleanLiteral) n, context);
     } else if (n instanceof BreakStatement) {
       return visit((BreakStatement) n, context);
     } else if (n instanceof CastExpression) {
@@ -3855,7 +3862,7 @@ public abstract class JDTJava2CAstTranslator<T extends Position> implements Tran
     } else if (n instanceof CatchClause) {
       return visit((CatchClause) n, context);
     } else if (n instanceof CharacterLiteral) {
-      return visit((CharacterLiteral) n);
+      return visit((CharacterLiteral) n, context);
     } else if (n instanceof ClassInstanceCreation) {
       return visit((ClassInstanceCreation) n, context);
     } else if (n instanceof ConditionalExpression) {
@@ -3889,7 +3896,7 @@ public abstract class JDTJava2CAstTranslator<T extends Position> implements Tran
     } else if (n instanceof NumberLiteral) {
       return visit((NumberLiteral) n, context);
     } else if (n instanceof NullLiteral) {
-      return visit();
+      return visit((NullLiteral) n, context);
     } else if (n instanceof ParenthesizedExpression) {
       return visit((ParenthesizedExpression) n, context);
     } else if (n instanceof PostfixExpression) {

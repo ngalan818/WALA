@@ -124,11 +124,25 @@ public class ToSourceFromJava extends ToSource {
       if (cls instanceof AstClass) {
         String clsName = nameToJava(cls.getName().toString().substring(1));
         File f = new File(outDir, clsName + ".java");
+        File dir = f.getParentFile();
+        if (!dir.exists()) {
+          dir.mkdirs();
+        }
         Set<Pair<String, String>> seen = HashSetFactory.make();
         try (PrintWriter all = new PrintWriter(new FileWriter(f))) {
           try (ByteArrayOutputStream bs = new ByteArrayOutputStream()) {
             try (PrintWriter out = new PrintWriter(bs)) {
-              out.println("public class " + nameToJava(clsName) + " {");
+              String cn;
+              if (clsName.contains("/")) {
+                cn = clsName.substring(clsName.lastIndexOf('/') + 1);
+                all.println(
+                    "package "
+                        + clsName.substring(0, clsName.lastIndexOf('/')).replace('/', '.')
+                        + ";");
+              } else {
+                cn = clsName;
+              }
+              out.println("public class " + nameToJava(cn) + " {");
               for (IField fr : cls.getDeclaredStaticFields()) {
                 out.println(
                     "  static "

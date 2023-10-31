@@ -2546,7 +2546,11 @@ public abstract class ToSource {
         case "-":
           return 5;
         case "==":
+        case "<":
         case ">":
+        case "<=":
+        case ">=":
+        case "!=":
           return 7;
         default:
           assert false : "unknown " + operator;

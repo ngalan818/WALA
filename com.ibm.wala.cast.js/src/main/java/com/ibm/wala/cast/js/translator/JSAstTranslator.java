@@ -257,7 +257,7 @@ public class JSAstTranslator extends AstTranslator {
   @Override
   protected void doMaterializeFunction(
       CAstNode n, WalkContext context, int result, int exception, CAstEntity fn) {
-    int nm = context.currentScope().getConstantValue('L' + composeEntityName(context, fn));
+    int nm = context.currentScope().getConstantValue('L' + composeEntityName(context, fn), null);
     // "Function" is the name we use to model the constructor of function values
     int tmp = super.doGlobalRead(n, context, "Function", JavaScriptTypes.Function);
     context
@@ -307,7 +307,7 @@ public class JSAstTranslator extends AstTranslator {
     if (elt.getKind() == CAstNode.CONSTANT && elt.getValue() instanceof String) {
       String field = (String) elt.getValue();
       // symtab needs to have this value
-      context.currentScope().getConstantValue(field);
+      context.currentScope().getConstantValue(field, null);
       context
           .cfg()
           .addInstruction(
@@ -388,8 +388,8 @@ public class JSAstTranslator extends AstTranslator {
   private void doPrimitiveNew(WalkContext context, int resultVal, String typeName) {
     doNewObject(context, null, resultVal, typeName + "Object", null);
     // set the class property of the new object
-    int rval = context.currentScope().getConstantValue(typeName);
-    context.currentScope().getConstantValue("class");
+    int rval = context.currentScope().getConstantValue(typeName, null);
+    context.currentScope().getConstantValue("class", null);
     context
         .cfg()
         .addInstruction(
@@ -410,7 +410,7 @@ public class JSAstTranslator extends AstTranslator {
                       .AssignInstruction(
                           context.cfg().getCurrentInstruction(),
                           resultVal,
-                          context.currentScope().getConstantValue(Float.NaN)));
+                          context.currentScope().getConstantValue(Float.NaN, null)));
           break;
         case "GlobalInfinity":
           context
@@ -420,7 +420,7 @@ public class JSAstTranslator extends AstTranslator {
                       .AssignInstruction(
                           context.cfg().getCurrentInstruction(),
                           resultVal,
-                          context.currentScope().getConstantValue(Float.POSITIVE_INFINITY)));
+                          context.currentScope().getConstantValue(Float.POSITIVE_INFINITY, null)));
           break;
         case "MathE":
           context
@@ -430,7 +430,7 @@ public class JSAstTranslator extends AstTranslator {
                       .AssignInstruction(
                           context.cfg().getCurrentInstruction(),
                           resultVal,
-                          context.currentScope().getConstantValue(Math.E)));
+                          context.currentScope().getConstantValue(Math.E, null)));
           break;
         case "MathPI":
           context
@@ -440,7 +440,7 @@ public class JSAstTranslator extends AstTranslator {
                       .AssignInstruction(
                           context.cfg().getCurrentInstruction(),
                           resultVal,
-                          context.currentScope().getConstantValue(Math.PI)));
+                          context.currentScope().getConstantValue(Math.PI, null)));
           break;
         case "MathSQRT1_2":
           context
@@ -450,7 +450,7 @@ public class JSAstTranslator extends AstTranslator {
                       .AssignInstruction(
                           context.cfg().getCurrentInstruction(),
                           resultVal,
-                          context.currentScope().getConstantValue(Math.sqrt(.5))));
+                          context.currentScope().getConstantValue(Math.sqrt(.5), null)));
           break;
         case "MathSQRT2":
           context
@@ -460,7 +460,7 @@ public class JSAstTranslator extends AstTranslator {
                       .AssignInstruction(
                           context.cfg().getCurrentInstruction(),
                           resultVal,
-                          context.currentScope().getConstantValue(Math.sqrt(2))));
+                          context.currentScope().getConstantValue(Math.sqrt(2), null)));
           break;
         case "MathLN2":
           context
@@ -470,7 +470,7 @@ public class JSAstTranslator extends AstTranslator {
                       .AssignInstruction(
                           context.cfg().getCurrentInstruction(),
                           resultVal,
-                          context.currentScope().getConstantValue(Math.log(2))));
+                          context.currentScope().getConstantValue(Math.log(2), null)));
           break;
         case "MathLN10":
           context
@@ -480,7 +480,7 @@ public class JSAstTranslator extends AstTranslator {
                       .AssignInstruction(
                           context.cfg().getCurrentInstruction(),
                           resultVal,
-                          context.currentScope().getConstantValue(Math.log(10))));
+                          context.currentScope().getConstantValue(Math.log(10), null)));
           break;
         case "NewObject":
           doNewObject(context, null, resultVal, "Object", null);
@@ -511,7 +511,7 @@ public class JSAstTranslator extends AstTranslator {
                       .AssignInstruction(
                           context.cfg().getCurrentInstruction(),
                           resultVal,
-                          context.currentScope().getConstantValue(null)));
+                          context.currentScope().getConstantValue(null, null)));
           break;
       }
     } catch (ClassCastException e) {
