@@ -29,6 +29,10 @@ public class CAstOperator implements CAstLeafNode {
     return ops.get(op);
   }
 
+  protected static void alias(String from, String to) {
+    ops.put(to, ops.get(from));
+  }
+
   private final String op;
 
   protected CAstOperator(String op) {
