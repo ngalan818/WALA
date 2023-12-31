@@ -4875,7 +4875,7 @@ public abstract class AstTranslator extends CAstVisitor<AstTranslator.WalkContex
     }
   }
 
-  private void doIfConvertSwitch(
+  protected void doIfConvertSwitch(
       CAstNode n, WalkContext context, CAstVisitor<WalkContext> visitor) {
     CAstControlFlowMap ctrl = context.getControlFlow();
     context.cfg().addPreNode(n, context.getUnwindState());
