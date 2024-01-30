@@ -49,6 +49,7 @@ import com.ibm.wala.classLoader.Module;
 import com.ibm.wala.classLoader.ModuleEntry;
 import com.ibm.wala.classLoader.SourceFileModule;
 import com.ibm.wala.ipa.callgraph.AnalysisScope;
+import com.ibm.wala.properties.WalaProperties;
 import com.ibm.wala.types.ClassLoaderReference;
 import com.ibm.wala.util.collections.HashMapFactory;
 import com.ibm.wala.util.collections.HashSetFactory;
@@ -201,8 +202,28 @@ public class ECJSourceModuleProcessor implements CAstGenerator {
     }
 
     if (libs.isEmpty()) {
-      libs.add("/Library/Java/JavaVirtualMachines/jdk1.8.0_311.jdk/Contents/Home/jre/lib/rt.jar");
+      for (String l : WalaProperties.getJ2SEJarFiles()) {
+        libs.add(l);
+      }
     }
+
+    /*
+     String cacheDir = System.getProperty("java.io.tmpdir");
+     for(String l : libs) {
+     	if (l.endsWith("jmod")) {
+     		try (JarFile jmod = new JarFile(l)) {
+     			new JarOutputStream(new FileOutputStream(cacheDir + "/" + new File(l).getName() + ".jar"))
+    	Enumeration<JarEntry> clss = jmod.entries();
+    	while (clss.hasMoreElements()) {
+    		JarEntry je = clss.nextElement();
+    		jmod.getInputStream(je);
+    	}
+    } catch (IOException e) {
+    	assert false : e;
+    }
+     	}
+     }
+     */
 
     return Pair.make(sources.toArray(new String[0]), libs.toArray(new String[0]));
   }

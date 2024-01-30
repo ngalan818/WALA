@@ -481,4 +481,8 @@ public class FakeExceptionTypeBinding implements ITypeBinding {
     // TODO Auto-generated method stub
     return null;
   }
+
+  public boolean isRecord() {
+    return false;
+  }
 }

@@ -13,6 +13,7 @@ import com.ibm.wala.cast.ir.ssa.AssignInstruction;
 import com.ibm.wala.cast.ir.ssa.AstPreInstructionVisitor;
 import com.ibm.wala.cast.ir.ssa.CAstBinaryOp;
 import com.ibm.wala.cast.ir.ssa.analysis.LiveAnalysis;
+import com.ibm.wala.cast.loader.AstMethod;
 import com.ibm.wala.cast.tree.CAst;
 import com.ibm.wala.cast.tree.CAstAnnotation;
 import com.ibm.wala.cast.tree.CAstControlFlowMap;
@@ -653,6 +654,8 @@ public abstract class ToSource {
         if (names != null && names.length > 0) {
           name = names[0];
         }
+      } else if (ir.getSymbolTable().isParameter(vn) && ir.getMethod() instanceof AstMethod) {
+        name = ((AstMethod) ir.getMethod()).getParameterName(vn);
       }
       return name;
     }
@@ -2169,15 +2172,17 @@ public abstract class ToSource {
     }
   }
 
-  class ToJavaVisitor extends CAstVisitor<CodeGenerationContext> {
+  protected class ToJavaVisitor extends CAstVisitor<CodeGenerationContext> {
     private final IR ir;
     private final int indent;
     private final PrintWriter out;
+    protected final Map<String, Object> varTypes;
 
-    private ToJavaVisitor(int indent, IR ir, PrintWriter out) {
+    protected ToJavaVisitor(int indent, IR ir, PrintWriter out, Map<String, Object> varTypes2) {
       this.ir = ir;
       this.out = out;
       this.indent = indent;
+      this.varTypes = varTypes2;
     }
 
     private void indent() {
@@ -2210,7 +2215,7 @@ public abstract class ToSource {
       visit(n.getChild(0), c, visitor);
       out.println(") {");
 
-      ToJavaVisitor cv = new ToJavaVisitor(indent + 1, ir, out);
+      ToJavaVisitor cv = makeToJavaVisitor(ir, out, indent + 1, varTypes);
       for (int i = 2; i < n.getChildCount(); i++) {
         CAstNode caseCAst = n.getChild(i);
         cv.indent();
@@ -2254,7 +2259,7 @@ public abstract class ToSource {
 
           int len = b.toString().trim().length();
           int count = 0;
-          ToJavaVisitor cv = new ToJavaVisitor(indent, ir, bw);
+          ToJavaVisitor cv = makeToJavaVisitor(ir, bw, indent, varTypes);
           for (CAstNode child : n.getChildren()) {
             if (child.getKind() != CAstNode.EMPTY) {
               cv.visit(child, c, cv);
@@ -2411,7 +2416,7 @@ public abstract class ToSource {
     @Override
     protected boolean visitLoop(
         CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
-      ToJavaVisitor cv = new ToJavaVisitor(indent + 1, ir, out);
+      ToJavaVisitor cv = makeToJavaVisitor(ir, out, indent + 1, varTypes);
       indent();
       out.print("while (");
       cv.visit(n.getChild(0), c, visitor);
@@ -2430,7 +2435,7 @@ public abstract class ToSource {
       try (ByteArrayOutputStream b = new ByteArrayOutputStream()) {
         try (PrintWriter bw = new PrintWriter(b)) {
 
-          ToJavaVisitor cthen = new ToJavaVisitor(indent + 1, ir, bw);
+          ToJavaVisitor cthen = makeToJavaVisitor(ir, bw, indent + 1, varTypes);
           cthen.visit(n.getChild(1), c, cthen);
 
           bw.flush();
@@ -2440,7 +2445,7 @@ public abstract class ToSource {
             try (ByteArrayOutputStream eb = new ByteArrayOutputStream()) {
               try (PrintWriter ebw = new PrintWriter(eb)) {
 
-                ToJavaVisitor celse = new ToJavaVisitor(indent + 1, ir, ebw);
+                ToJavaVisitor celse = makeToJavaVisitor(ir, ebw, indent + 1, varTypes);
                 celse.visit(n.getChild(2), c, celse);
 
                 ebw.flush();
@@ -2458,7 +2463,7 @@ public abstract class ToSource {
       indent();
       if (thenJavaText.length() > 0) {
         if (elseJavaText.length() > 0) {
-          ToJavaVisitor cif = new ToJavaVisitor(indent + 1, ir, out);
+          ToJavaVisitor cif = makeToJavaVisitor(ir, out, indent + 1, varTypes);
           out.print("if (");
           cif.visit(reverse ? n.getChild(0).getChild(1) : n.getChild(0), c, cif);
           out.println(")");
@@ -2468,7 +2473,7 @@ public abstract class ToSource {
           out.print(reverse ? thenJavaText : elseJavaText);
 
         } else {
-          ToJavaVisitor cif = new ToJavaVisitor(indent + 1, ir, out);
+          ToJavaVisitor cif = makeToJavaVisitor(ir, out, indent + 1, varTypes);
           out.print("if (");
           cif.visit(n.getChild(0), c, cif);
           out.println(")");
@@ -2476,7 +2481,7 @@ public abstract class ToSource {
         }
       } else {
         if (elseJavaText.length() > 0) {
-          ToJavaVisitor cif = new ToJavaVisitor(indent + 1, ir, out);
+          ToJavaVisitor cif = makeToJavaVisitor(ir, out, indent + 1, varTypes);
           out.print("if (");
           cif.visit(
               reverse
@@ -2488,7 +2493,7 @@ public abstract class ToSource {
           out.print(elseJavaText);
 
         } else {
-          ToJavaVisitor cif = new ToJavaVisitor(indent + 1, ir, out);
+          ToJavaVisitor cif = makeToJavaVisitor(ir, out, indent + 1, varTypes);
           cif.visit(n.getChild(0), c, cif);
           out.println(";");
         }
@@ -2657,11 +2662,25 @@ public abstract class ToSource {
     CAstNode ast = root.toCAst();
     System.err.println(ast);
 
+    Map<String, Object> varTypes = HashMapFactory.make();
+    CAstPattern decls = CAstPattern.parse("DECL_STMT(VAR(<name>*),<type>*,**)");
+    CAstPattern.findAll(decls, ast)
+        .forEach(
+            s -> {
+              varTypes.put(
+                  (String) ((CAstNode) s.get("name")).getValue(),
+                  ((CAstNode) s.get("type")).getValue());
+            });
+
     MutableIntSet done = IntSetUtil.make();
 
     IMethod m = ir.getMethod();
     if (m.isClinit()) {
-      out.println("  static");
+      if (ast.getKind() != CAstNode.BLOCK_STMT || ast.getChildCount() == 1) {
+        out.println("  static {");
+      } else {
+        out.println("  static");
+      }
 
     } else {
       out.print("  public ");
@@ -2737,7 +2756,7 @@ public abstract class ToSource {
       inits.add(ast.getChild(0));
     }
 
-    ToJavaVisitor toJava = new ToJavaVisitor(level, ir, out);
+    ToJavaVisitor toJava = makeToJavaVisitor(ir, out, level, varTypes);
 
     for (int vn = ir.getSymbolTable().getNumberOfParameters() + 1;
         vn <= ir.getSymbolTable().getMaxValueNumber();
@@ -2763,6 +2782,16 @@ public abstract class ToSource {
     ast = cast.makeNode(CAstNode.BLOCK_STMT, inits);
 
     toJava.visit(ast, new CodeGenerationContext(types, root.mergePhis), toJava);
+
+    if (m.isClinit() && (ast.getKind() != CAstNode.BLOCK_STMT || ast.getChildCount() == 1)) {
+      out.println("  }");
+    }
+  }
+
+  protected ToJavaVisitor makeToJavaVisitor(
+      IR ir, PrintWriter out, int level, Map<String, Object> varTypes) {
+    ToJavaVisitor toJava = makeToJavaVisitor(ir, out, level, varTypes);
+    return toJava;
   }
 
   protected RegionTreeNode makeTreeNode(

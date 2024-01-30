@@ -519,6 +519,8 @@ public abstract class AstTranslator extends CAstVisitor<AstTranslator.WalkContex
 
     private final SortedSet<Position> codePositions;
 
+    private final String[] names;
+
     AstDebuggingInformation(
         Position codeBodyNamePosition,
         Position codeBodyPosition,
@@ -527,6 +529,8 @@ public abstract class AstTranslator extends CAstVisitor<AstTranslator.WalkContex
         Position[] parameterPositions,
         String[] names,
         SortedSet<Position> codePositions) {
+      this.names = names;
+
       this.codePositions = codePositions;
 
       this.codeBodyNamePosition = codeBodyNamePosition;
@@ -675,6 +679,11 @@ public abstract class AstTranslator extends CAstVisitor<AstTranslator.WalkContex
     @Override
     public String getLeadingComment(int instructionOffset) throws IOException {
       return getComment(instructionOffset, codePositions::headSet);
+    }
+
+    @Override
+    public String getParameterName(int i) {
+      return names[i];
     }
   }
 

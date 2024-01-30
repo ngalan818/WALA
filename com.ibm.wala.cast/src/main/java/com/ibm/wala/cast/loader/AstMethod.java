@@ -60,6 +60,8 @@ public abstract class AstMethod implements IMethod {
     String getLeadingComment(int instructionOffset) throws IOException;
 
     String getFollowingComment(int instructionOffset) throws IOException;
+
+    String getParameterName(int i);
   }
 
   /**
@@ -378,6 +380,10 @@ public abstract class AstMethod implements IMethod {
 
   public Position getParameterPosition(int paramIndex) {
     return debugInfo.getParameterPosition(paramIndex);
+  }
+
+  public String getParameterName(int i) {
+    return debugInfo.getParameterName(i);
   }
 
   @Override

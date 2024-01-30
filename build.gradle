@@ -38,7 +38,7 @@ group name
 version VERSION_NAME
 
 // version of Eclipse JARs to use for Eclipse-integrated WALA components
-ext.eclipseVersion = '4.14.0'
+ext.eclipseVersion = '4.20.0'
 ext.eclipseWstJsdtVersion = '1.0.201.v2010012803'
 
 subprojects { subproject ->
@@ -71,20 +71,47 @@ subprojects { subproject ->
 		}
 	}
 
-    dependencies.constraints {
+   dependencies.constraints {
     	[
     			'org.eclipse.platform:org.eclipse.core.resources',
     			'org.eclipse.platform:org.eclipse.equinox.common',
     	].forEach {
     		implementation(it) {
-    			version { strictly '(,3.15)' }
+    			version { strictly '(,3.19)' }
     			because 'Versions 3.15 and later of this artifact require Java 11.'
     		}
     	}
-        implementation('org.eclipse.platform:org.eclipse.core.commands') {
-                version { strictly '(,3.9.800)' }
+
+       implementation('org.eclipse.platform:org.eclipse.core.runtime') {
+                version { strictly '(,3.23)' }
                 because 'Versions 3.10.0 and later of this artifact require Java 11.'
         }
+  
+       implementation('org.eclipse.platform:org.eclipse.jface') {
+                version { strictly '(,3.23)' }
+                because 'Versions 3.10.0 and later of this artifact require Java 11.'
+        }
+  
+       implementation('org.eclipse.platform:org.eclipse.swt') {
+                version { strictly '(,3.117)' }
+                because 'Versions 3.10.0 and later of this artifact require Java 11.'
+        }
+  
+       implementation('org.eclipse.platform:org.eclipse.core.commands') {
+                version { strictly '(,3.11)' }
+                because 'Versions 3.10.0 and later of this artifact require Java 11.'
+        }
+  
+       implementation('org.eclipse.platform:org.eclipse.core.jobs') {
+                version { strictly '(,3.12)' }
+                because 'Versions 3.10.0 and later of this artifact require Java 11.'
+        }
+  
+       implementation('org.eclipse.jdt:org.eclipse.jdt.core') {
+                version { strictly '(,3.27)' }
+                because 'Versions 3.10.0 and later of this artifact require Java 11.'
+        }
+  
     }
 
 	configurations {

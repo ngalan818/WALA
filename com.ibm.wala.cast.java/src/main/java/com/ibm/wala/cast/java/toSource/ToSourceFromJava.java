@@ -191,7 +191,7 @@ public class ToSourceFromJava extends ToSource {
                           all.println("import " + key.fst + "." + key.snd + ";");
                         }
                       },
-                      1);
+                      2);
                 }
               }
               out.println("}");

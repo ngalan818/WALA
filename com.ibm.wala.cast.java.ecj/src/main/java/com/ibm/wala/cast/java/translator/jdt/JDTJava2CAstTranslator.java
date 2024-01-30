@@ -1521,6 +1521,13 @@ public abstract class JDTJava2CAstTranslator<T extends Position> implements Tran
       else if (t.equals("D") || t.equals("F")) initNode = fFactory.makeConstant(0.0);
       else initNode = fFactory.makeConstant(null);
     } else if ((o = init.resolveConstantExpressionValue()) != null) {
+      if (o instanceof Number) {
+        if (t.equals("D")) {
+          o = ((Number) o).doubleValue();
+        } else if (t.equals("F")) {
+          o = ((Number) o).floatValue();
+        }
+      }
       initNode = fFactory.makeConstant(o);
       setPos(context, initNode, init);
     } else initNode = visitNode(init, context);
