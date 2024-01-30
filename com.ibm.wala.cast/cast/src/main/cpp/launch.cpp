@@ -1,5 +1,8 @@
 #include <cstdio>
- #include <jni.h>
+#ifdef __CYGWIN__
+typedef long long __int64;
+#endif
+#include <jni.h>
 #include <string>
 #include "Exceptions.h"
 #include "CAstWrapper.h"

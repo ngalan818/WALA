@@ -1,6 +1,9 @@
 #include <CAstWrapper.h>
 #include <cstring>
 #include <iterator>
+#ifdef __CYGWIN__
+typedef long long __int64;
+#endif
 #include <jni.h>
 #include <sstream>
 #include <string>
