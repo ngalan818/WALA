@@ -1,3 +1,7 @@
+#ifdef __CYGWIN__
+typedef long long __int64;
+#endif
+
 #include "launch.h"
 #include <stdlib.h>
 #include <string.h>
