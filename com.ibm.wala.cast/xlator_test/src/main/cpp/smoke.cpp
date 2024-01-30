@@ -1,3 +1,7 @@
+#ifdef __CYGWIN__
+typedef long long __int64;
+#endif
+
 #include "CAstWrapper.h"
 #include "com_ibm_wala_cast_test_TestNativeTranslator.h"
 
