@@ -112,6 +112,8 @@ public abstract class SSAInstruction {
     default void visitGetCaughtException(SSAGetCaughtExceptionInstruction instruction) {}
 
     default void visitLoadMetadata(SSALoadMetadataInstruction instruction) {}
+
+    default void visitUnspecified(SSAUnspecifiedInstruction instruction) {}
   }
 
   /** A base visitor implementation that does nothing. */

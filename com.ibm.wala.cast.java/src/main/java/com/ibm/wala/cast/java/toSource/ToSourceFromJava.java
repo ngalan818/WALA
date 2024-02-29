@@ -31,13 +31,79 @@ import java.io.PrintWriter;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Consumer;
 import java.util.function.Predicate;
 
 public class ToSourceFromJava extends ToSource {
 
   @Override
-  protected String nameToJava(String name) {
-    return name;
+  protected String nameToJava(String name, boolean isType) {
+    if (isType) {
+      return name.replace('$', '.');
+    } else {
+      return name;
+    }
+  }
+
+  protected class JavaRegionTreeNode extends RegionTreeNode {
+
+    public JavaRegionTreeNode(
+        IR ir, IClassHierarchy cha, TypeInference types, SSAInstruction r, ISSABasicBlock l) {
+      super(ir, cha, types, r, l);
+    }
+
+    public JavaRegionTreeNode(RegionTreeNode parent, SSAInstruction r, ISSABasicBlock l) {
+      super(parent, r, l);
+    }
+
+    @Override
+    protected RegionTreeNode makeChild(Pair<SSAInstruction, ISSABasicBlock> k) {
+      return new JavaRegionTreeNode(this, k.fst, k.snd);
+    }
+
+    @Override
+    protected ToCAst makeToCAst(List<SSAInstruction> c) {
+      return new ToCAst(c, new CodeGenerationContext(types, mergePhis, false)) {
+
+        class JavaVisitor
+            extends com.ibm.wala.cast.ir.toSource.ToSource.RegionTreeNode.ToCAst.Visitor
+            implements AstJavaInstructionVisitor {
+
+          public JavaVisitor(
+              SSAInstruction root,
+              CodeGenerationContext c,
+              List<SSAInstruction> chunk,
+              List<CAstNode> parentDecls,
+              Map<String, Set<String>> packages,
+              Map<SSAInstruction, Map<ISSABasicBlock, RegionTreeNode>> children,
+              boolean extraHeaderCode) {
+            super(root, c, chunk, parentDecls, packages, children, extraHeaderCode);
+          }
+
+          @Override
+          public void visitJavaInvoke(AstJavaInvokeInstruction instruction) {
+            visitAbstractInvoke(instruction);
+          }
+
+          @Override
+          public void visitEnclosingObjectReference(EnclosingObjectReference inst) {
+            // TODO Auto-generated method stub
+
+          }
+        }
+
+        @Override
+        protected Visitor makeVisitor(
+            SSAInstruction root,
+            CodeGenerationContext c,
+            List<SSAInstruction> chunk,
+            List<CAstNode> parentDecls,
+            Map<String, Set<String>> packages,
+            boolean extraHeaderCode) {
+          return new JavaVisitor(root, c, chunk, parentDecls, packages, children, extraHeaderCode);
+        }
+      };
+    }
   }
 
   @Override
@@ -46,65 +112,6 @@ public class ToSourceFromJava extends ToSource {
       IClassHierarchy cha,
       TypeInference types,
       PrunedCFG<SSAInstruction, ISSABasicBlock> cfg) {
-    class JavaRegionTreeNode extends RegionTreeNode {
-
-      public JavaRegionTreeNode(
-          IR ir, IClassHierarchy cha, TypeInference types, SSAInstruction r, ISSABasicBlock l) {
-        super(ir, cha, types, r, l);
-      }
-
-      public JavaRegionTreeNode(RegionTreeNode parent, SSAInstruction r, ISSABasicBlock l) {
-        super(parent, r, l);
-      }
-
-      @Override
-      protected RegionTreeNode makeChild(Pair<SSAInstruction, ISSABasicBlock> k) {
-        return new JavaRegionTreeNode(this, k.fst, k.snd);
-      }
-
-      @Override
-      protected ToCAst makeToCAst(List<SSAInstruction> c) {
-        return new ToCAst(c, new CodeGenerationContext(types, mergePhis)) {
-
-          class JavaVisitor extends Visitor implements AstJavaInstructionVisitor {
-
-            public JavaVisitor(
-                SSAInstruction root,
-                CodeGenerationContext c,
-                List<SSAInstruction> chunk,
-                List<CAstNode> parentDecls,
-                Map<String, Set<String>> packages,
-                Map<SSAInstruction, Map<ISSABasicBlock, RegionTreeNode>> children,
-                boolean extraHeaderCode) {
-              super(root, c, chunk, parentDecls, packages, children, extraHeaderCode);
-            }
-
-            @Override
-            public void visitJavaInvoke(AstJavaInvokeInstruction instruction) {
-              visitAbstractInvoke(instruction);
-            }
-
-            @Override
-            public void visitEnclosingObjectReference(EnclosingObjectReference inst) {
-              // TODO Auto-generated method stub
-
-            }
-          }
-
-          @Override
-          protected Visitor makeVisitor(
-              SSAInstruction root,
-              CodeGenerationContext c,
-              List<SSAInstruction> chunk,
-              List<CAstNode> parentDecls,
-              Map<String, Set<String>> packages,
-              boolean extraHeaderCode) {
-            return new JavaVisitor(
-                root, c, chunk, parentDecls, packages, children, extraHeaderCode);
-          }
-        };
-      }
-    }
     return new JavaRegionTreeNode(
         ir, cha, types, cfg.getNode(1).getLastInstruction(), cfg.getNode(2));
   }
@@ -122,7 +129,7 @@ public class ToSourceFromJava extends ToSource {
     Set<File> files = HashSetFactory.make();
     for (IClass cls : cg.getClassHierarchy()) {
       if (cls instanceof AstClass) {
-        String clsName = nameToJava(cls.getName().toString().substring(1));
+        String clsName = nameToJava(cls.getName().toString().substring(1), true);
         File f = new File(outDir, clsName + ".java");
         File dir = f.getParentFile();
         if (!dir.exists()) {
@@ -142,36 +149,46 @@ public class ToSourceFromJava extends ToSource {
               } else {
                 cn = clsName;
               }
-              out.println("public class " + nameToJava(cn) + " {");
+              out.println("public class " + nameToJava(cn, true) + " {");
               for (IField fr : cls.getDeclaredStaticFields()) {
                 out.println(
                     "  static "
-                        + nameToJava(toSource(fr.getFieldTypeReference()).getName())
+                        + nameToJava(toSource(fr.getFieldTypeReference()).getName(), true)
                         + " "
-                        + nameToJava(fr.getName().toString())
+                        + nameToJava(fr.getName().toString(), false)
                         + ";");
               }
               for (IField fr : cls.getDeclaredInstanceFields()) {
                 out.println(
-                    nameToJava(toSource(fr.getFieldTypeReference()).getName())
+                    nameToJava(toSource(fr.getFieldTypeReference()).getName(), true)
                         + " "
-                        + nameToJava(fr.getName().toString())
+                        + nameToJava(fr.getName().toString(), false)
                         + ";");
               }
               for (IMethod m : cls.getDeclaredMethods()) {
                 if (code.containsKey(m)) {
+                  Consumer<TypeReference> checkImport =
+                      (e) -> {
+                        if (e.isReferenceType() && e.getName().getPackage() != null) {
+                          Pair<String, String> key =
+                              Pair.make(
+                                  e.getName().getPackage().toString().replace('/', '.'),
+                                  nameToJava(e.getName().getClassName().toString(), true));
+                          if (!seen.contains(key)) {
+                            seen.add(key);
+                            all.println("import " + key.fst + "." + key.snd + ";");
+                          }
+                        }
+                      };
+                  for (int i = 0; i < m.getNumberOfParameters(); i++) {
+                    checkImport.accept(m.getParameterType(i));
+                  }
                   if (m.getDeclaredExceptions() != null) {
                     for (TypeReference e : m.getDeclaredExceptions()) {
-                      Pair<String, String> key =
-                          Pair.make(
-                              e.getName().getPackage().toString().replace('/', '.'),
-                              e.getName().getClassName().toString());
-                      if (!seen.contains(key)) {
-                        seen.add(key);
-                        all.println("import " + key.fst + "." + key.snd + ";");
-                      }
+                      checkImport.accept(e);
                     }
                   }
+
                   IR ir = code.get(m);
                   AstJavaTypeInference types = new AstJavaTypeInference(ir, true);
                   types.solve();
@@ -188,7 +205,7 @@ public class ToSourceFromJava extends ToSource {
                                 (String) i.getChild(1).getValue());
                         if (!seen.contains(key)) {
                           seen.add(key);
-                          all.println("import " + key.fst + "." + key.snd + ";");
+                          all.println("import " + key.fst + "." + nameToJava(key.snd, true) + ";");
                         }
                       },
                       2);

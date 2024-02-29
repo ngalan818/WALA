@@ -71,6 +71,7 @@ import com.ibm.wala.ssa.SSAReturnInstruction;
 import com.ibm.wala.ssa.SSASwitchInstruction;
 import com.ibm.wala.ssa.SSAThrowInstruction;
 import com.ibm.wala.ssa.SSAUnaryOpInstruction;
+import com.ibm.wala.ssa.SSAUnspecifiedInstruction;
 import com.ibm.wala.ssa.SymbolTable;
 import com.ibm.wala.types.FieldReference;
 import com.ibm.wala.types.MethodReference;
@@ -123,7 +124,7 @@ public abstract class ToSource {
 
   private final CAst ast = new CAstImpl();
 
-  protected abstract String nameToJava(String name);
+  protected abstract String nameToJava(String name, boolean isTypeName);
 
   private static CAstPattern varDefPattern(CAstNode varName) {
     return CAstPattern.parse("DECL_STMT(VAR(\"" + varName.getValue() + "\"),**)");
@@ -187,19 +188,23 @@ public abstract class ToSource {
     return false;
   }
 
-  private static class TreeBuilder {
+  protected static class TreeBuilder {
     private boolean functionalOnly = false;
     private final IClassHierarchy cha;
     private final ControlDependenceGraph<ISSABasicBlock> cdg;
     private final ControlFlowGraph<SSAInstruction, ISSABasicBlock> cfg;
 
-    private TreeBuilder(
+    protected TreeBuilder(
         IClassHierarchy cha,
         ControlFlowGraph<SSAInstruction, ISSABasicBlock> cfg,
         ControlDependenceGraph<ISSABasicBlock> cdg) {
       this.cha = cha;
       this.cdg = cdg;
       this.cfg = cfg;
+    }
+
+    protected boolean shouldMergeIfPossible(@SuppressWarnings("unused") SSAInstruction inst) {
+      return true;
     }
 
     private void gatherInstructions(
@@ -213,7 +218,9 @@ public abstract class ToSource {
         int limit,
         IntSet unmergeableValues) {
       SSAInstruction inst = du.getDef(vn);
-      if (ir.getSymbolTable().isConstant(vn)) {
+      if (inst != null && !shouldMergeIfPossible(inst)) {
+        return;
+      } else if (ir.getSymbolTable().isConstant(vn)) {
         return;
       } else if (vn <= ir.getSymbolTable().getNumberOfParameters()) {
         return;
@@ -230,7 +237,7 @@ public abstract class ToSource {
       }
 
       assert inst != null;
-      if (inst.iIndex() <= limit) {
+      if (inst.iIndex() <= limit && shouldMergeIfPossible(inst)) {
         gatherInstructions(
             stuff, ir, du, regionInsts, inst, chunks, unmergeableValues, loopControl);
       }
@@ -321,7 +328,7 @@ public abstract class ToSource {
           }
         }
 
-        if (!depOk && !deemedFunctional(inst, regionInsts, cha)) {
+        if (!depOk && !deemedFunctional(inst, regionInsts)) {
           if (loopControl != null || functionalOnly) {
             if (stuff.isEmpty()) {
               stuff.add(inst);
@@ -350,6 +357,10 @@ public abstract class ToSource {
           }
         }
       }
+    }
+
+    protected boolean deemedFunctional(SSAInstruction inst, List<SSAInstruction> regionInsts) {
+      return ToSource.deemedFunctional(inst, regionInsts, cha);
     }
   }
 
@@ -498,20 +509,38 @@ public abstract class ToSource {
       return mergePhis;
     }
 
+    private final boolean isTopLevel;
     private int parentPrecedence;
     private final TypeInference types;
     private final IntegerUnionFind mergePhis;
 
-    public CodeGenerationContext(TypeInference types, IntegerUnionFind mergePhis) {
+    public CodeGenerationContext nonTopLevel() {
+      if (!isTopLevel()) {
+        return this;
+      } else {
+        return new CodeGenerationContext(this, parentPrecedence) {
+
+          @Override
+          public boolean isTopLevel() {
+            return false;
+          }
+        };
+      }
+    }
+
+    public CodeGenerationContext(
+        TypeInference types, IntegerUnionFind mergePhis, boolean isTopLevel) {
       this.types = types;
       this.mergePhis = mergePhis;
       this.parentPrecedence = Integer.MAX_VALUE;
+      this.isTopLevel = isTopLevel;
     }
 
     public CodeGenerationContext(CodeGenerationContext parent, int precedence) {
       this.types = parent.types;
       this.mergePhis = parent.mergePhis;
       this.parentPrecedence = precedence;
+      this.isTopLevel = false;
     }
 
     @Override
@@ -524,12 +553,24 @@ public abstract class ToSource {
       // TODO Auto-generated method stub
       return null;
     }
+
+    public boolean isTopLevel() {
+      return isTopLevel;
+    }
   }
 
-  protected static class RegionTreeNode {
+  protected TreeBuilder makeTreeBuilder(
+      @SuppressWarnings("unused") IR ir,
+      IClassHierarchy cha,
+      PrunedCFG<SSAInstruction, ISSABasicBlock> cfg,
+      ControlDependenceGraph<ISSABasicBlock> cdg) {
+    return new TreeBuilder(cha, cfg, cdg);
+  }
+
+  protected class RegionTreeNode {
 
     private final IClassHierarchy cha;
-    private final TypeInference types;
+    protected final TypeInference types;
     private final Map<Set<Pair<SSAInstruction, ISSABasicBlock>>, Set<ISSABasicBlock>> regions;
     private final Map<Pair<SSAInstruction, ISSABasicBlock>, List<SSAInstruction>> linePhis;
     private final Map<Pair<SSAInstruction, ISSABasicBlock>, List<List<SSAInstruction>>>
@@ -548,9 +589,13 @@ public abstract class ToSource {
     private final ControlDependenceGraph<ISSABasicBlock> cdg;
     private final IR ir;
     private BasicNaturalRelation livenessConflicts;
-    private final Map<Integer, String> sourceNames;
+    protected final Map<Integer, String> sourceNames;
     protected final Map<SSAInstruction, Map<ISSABasicBlock, RegionTreeNode>> children =
         HashMapFactory.make();
+
+    protected CAstNode makeVariableName(int vn) {
+      return ast.makeConstant(sourceNames.get(vn));
+    }
 
     private Pair<BasicNaturalRelation, Iterable<SSAPhiInstruction>> orderPhisAndDetectCycles(
         Iterator<SSAPhiInstruction> blockPhis) {
@@ -619,14 +664,14 @@ public abstract class ToSource {
       System.err.println("added children for " + r + "," + l + ": " + children);
     }
 
-    private static boolean hasAllByIdentity(List<SSAInstruction> all, List<SSAInstruction> some) {
+    private boolean hasAllByIdentity(List<SSAInstruction> all, List<SSAInstruction> some) {
       return !some.stream()
           .filter(si -> !all.stream().anyMatch(ai -> ai == si))
           .findFirst()
           .isPresent();
     }
 
-    private static void removeAllByIdentity(List<SSAInstruction> all, List<SSAInstruction> some) {
+    private void removeAllByIdentity(List<SSAInstruction> all, List<SSAInstruction> some) {
       for (Iterator<SSAInstruction> insts = all.iterator(); insts.hasNext(); ) {
         SSAInstruction inst = insts.next();
         if (some.stream().anyMatch(si -> si == inst)) {
@@ -635,7 +680,7 @@ public abstract class ToSource {
       }
     }
 
-    private static int positionByIdentity(List<SSAInstruction> all, SSAInstruction item) {
+    private int positionByIdentity(List<SSAInstruction> all, SSAInstruction item) {
       for (int i = 0; i < all.size(); i++) {
         if (all.get(i) == item) {
           return i;
@@ -648,16 +693,20 @@ public abstract class ToSource {
     private String toSourceName(int vn) {
       vn = mergePhis.find(vn);
       String name = "var_" + vn;
-      SSAInstruction def = du.getDef(vn);
-      if (def != null) {
-        String[] names = ir.getLocalNames(def.iIndex(), vn);
-        if (names != null && names.length > 0) {
-          name = names[0];
+      if (ir.getSymbolTable().isParameter(vn) && ir.getMethod() instanceof AstMethod) {
+        return ((AstMethod) ir.getMethod()).getParameterName(vn);
+      } else {
+        for (Iterator<SSAInstruction> uses = du.getUses(vn); uses.hasNext(); ) {
+          SSAInstruction uv = uses.next();
+          if (uv.iIndex() >= 0) {
+            String[] names = ir.getLocalNames(uv.iIndex(), vn);
+            if (names != null && names.length > 0) {
+              name = names[0];
+            }
+          }
         }
-      } else if (ir.getSymbolTable().isParameter(vn) && ir.getMethod() instanceof AstMethod) {
-        name = ((AstMethod) ir.getMethod()).getParameterName(vn);
+        return name;
       }
-      return name;
     }
 
     private Map<Integer, String> makeNames() {
@@ -1098,7 +1147,7 @@ public abstract class ToSource {
                 regionInsts.forEach(
                     inst -> {
                       Set<SSAInstruction> insts = HashSetFactory.make();
-                      (new TreeBuilder(cha, cfg, cdg))
+                      makeTreeBuilder(ir, cha, cfg, cdg)
                           .gatherInstructions(
                               insts,
                               ir,
@@ -1114,6 +1163,7 @@ public abstract class ToSource {
                                   : null);
                       if (insts.isEmpty()) {
                         insts.add(inst);
+                        chunks.insert(new LinkedList<>(insts));
                       }
                       System.err.println("chunk for " + inst + ": " + insts);
                     });
@@ -1222,7 +1272,7 @@ public abstract class ToSource {
       }
     }
 
-    private static void indent(StringBuffer text, int level) {
+    private void indent(StringBuffer text, int level) {
       for (int i = 0; i < level; i++) {
         text.append("  ");
       }
@@ -1278,7 +1328,7 @@ public abstract class ToSource {
     }
 
     protected ToCAst makeToCAst(List<SSAInstruction> insts) {
-      return new ToCAst(insts, new CodeGenerationContext(types, mergePhis));
+      return new ToCAst(insts, new CodeGenerationContext(types, mergePhis, false));
     }
 
     private void toString(StringBuffer text, int level) {
@@ -1327,7 +1377,7 @@ public abstract class ToSource {
       return sb.toString();
     }
 
-    private final CAst ast = new CAstImpl();
+    protected final CAst ast = new CAstImpl();
 
     private final Map<String, Set<String>> packages;
 
@@ -1393,7 +1443,7 @@ public abstract class ToSource {
                         CAstNode.EXPR_STMT,
                         ast.makeNode(
                             CAstNode.ASSIGN,
-                            ast.makeNode(CAstNode.VAR, ast.makeConstant(sourceNames.get(def))),
+                            ast.makeNode(CAstNode.VAR, makeVariableName(def)),
                             val));
               } else {
                 CAstNode val = node;
@@ -1406,7 +1456,7 @@ public abstract class ToSource {
                 node =
                     ast.makeNode(
                         CAstNode.DECL_STMT,
-                        ast.makeNode(CAstNode.VAR, ast.makeConstant(sourceNames.get(def))),
+                        ast.makeNode(CAstNode.VAR, makeVariableName(def)),
                         ast.makeConstant(type),
                         val);
               }
@@ -1437,12 +1487,12 @@ public abstract class ToSource {
             return ast.makeConstant(value);
           } else if (ST.getNumberOfParameters() >= vn) {
             if (cfg.getMethod().isStatic()) {
-              return ast.makeNode(CAstNode.VAR, ast.makeConstant(sourceNames.get(vn)));
+              return ast.makeNode(CAstNode.VAR, makeVariableName(vn));
             } else {
               if (vn == 1) {
                 return ast.makeNode(CAstNode.THIS);
               } else {
-                return ast.makeNode(CAstNode.VAR, ast.makeConstant(sourceNames.get(vn)));
+                return ast.makeNode(CAstNode.VAR, makeVariableName(vn));
               }
             }
           } else {
@@ -1459,21 +1509,19 @@ public abstract class ToSource {
                   decls.add(
                       ast.makeNode(
                           CAstNode.DECL_STMT,
-                          ast.makeNode(CAstNode.VAR, ast.makeConstant(sourceNames.get(vn))),
+                          ast.makeNode(CAstNode.VAR, makeVariableName(vn)),
                           ast.makeConstant(toSource(c.getTypes().getType(vn).getTypeReference()))));
                 }
 
                 return ast.makeNode(
                     CAstNode.BLOCK_EXPR,
                     ast.makeNode(
-                        CAstNode.ASSIGN,
-                        ast.makeNode(CAstNode.VAR, ast.makeConstant(sourceNames.get(vn))),
-                        node));
+                        CAstNode.ASSIGN, ast.makeNode(CAstNode.VAR, makeVariableName(vn)), node));
               } else {
                 return node;
               }
             } else {
-              return ast.makeNode(CAstNode.VAR, ast.makeConstant(sourceNames.get(vn)));
+              return ast.makeNode(CAstNode.VAR, makeVariableName(vn));
             }
           }
         }
@@ -2146,6 +2194,13 @@ public abstract class ToSource {
         public void visitAssign(AssignInstruction inst) {
           node = visit(inst.getUse(0));
         }
+
+        @Override
+        public void visitUnspecified(SSAUnspecifiedInstruction instruction) {
+          node =
+              ast.makeNode(
+                  CAstNode.PRIMITIVE, ast.makeConstant(instruction.getPayload().toString()));
+        }
       }
 
       protected Visitor makeVisitor(
@@ -2241,7 +2296,7 @@ public abstract class ToSource {
     protected boolean visitDeclStmt(
         CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
       indent();
-      out.print(((CAstType) n.getChild(1).getValue()).getName() + " ");
+      out.print(nameToJava(((CAstType) n.getChild(1).getValue()).getName(), true) + " ");
       visit(n.getChild(0), c, visitor);
       if (n.getChildCount() > 2 && n.getChild(2).getKind() != CAstNode.EMPTY) {
         out.print(" = ");
@@ -2254,6 +2309,7 @@ public abstract class ToSource {
     @Override
     protected boolean visitBlockStmt(
         CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
+      CodeGenerationContext cc = c.nonTopLevel();
       try (ByteArrayOutputStream b = new ByteArrayOutputStream()) {
         try (PrintWriter bw = new PrintWriter(b)) {
 
@@ -2262,7 +2318,7 @@ public abstract class ToSource {
           ToJavaVisitor cv = makeToJavaVisitor(ir, bw, indent, varTypes);
           for (CAstNode child : n.getChildren()) {
             if (child.getKind() != CAstNode.EMPTY) {
-              cv.visit(child, c, cv);
+              cv.visit(child, cc, cv);
               bw.flush();
               int ln = b.toString().trim().length();
               if (ln > len) count++;
@@ -2274,17 +2330,17 @@ public abstract class ToSource {
 
           String trimmedCode = javaText.trim();
           if (trimmedCode.length() > 0) {
-            if (count > 1) {
+            if (count > 1 || c.isTopLevel()) {
               indent(1);
               out.println("{");
             }
-            if (count <= 1) {
+            if (count <= 1 && !c.isTopLevel()) {
               indent(trimmedCode.startsWith("{") ? 1 : 0);
               out.println(trimmedCode);
             } else {
               out.print(javaText);
             }
-            if (count > 1) {
+            if (count > 1 || c.isTopLevel()) {
               indent(1);
               out.println("}");
             }
@@ -2301,7 +2357,7 @@ public abstract class ToSource {
         CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
       Object v = n.getValue();
       if (v instanceof FieldReference) {
-        out.print(nameToJava(((FieldReference) v).getName().toString()));
+        out.print(nameToJava(((FieldReference) v).getName().toString(), false));
       } else if (v instanceof Character) {
         out.print("'" + v + "'");
       } else if (v instanceof String) {
@@ -2321,7 +2377,7 @@ public abstract class ToSource {
     protected boolean visitVar(
         CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
       String nm = n.getChild(0).getValue().toString();
-      out.print(nameToJava(nm));
+      out.print(nameToJava(nm, false));
       return true;
     }
 
@@ -2358,7 +2414,7 @@ public abstract class ToSource {
         Atom type = target.getDeclaringClass().getName().getClassName();
         visit(n.getChild(2), c, this);
         if (n.getChild(2).getKind() != CAstNode.THIS && n.getChild(2).getKind() != CAstNode.SUPER) {
-          out.print(" = new " + nameToJava(type.toString()));
+          out.print(" = new " + nameToJava(type.toString(), true));
         }
         out.print("(");
         for (int i = 3; i < n.getChildCount(); i++) {
@@ -2370,7 +2426,8 @@ public abstract class ToSource {
       } else if (isStatic) {
         Atom type = target.getDeclaringClass().getName().getClassName();
         Atom name = target.getName();
-        out.print(nameToJava(type.toString()) + "." + nameToJava(name.toString()) + "(");
+        out.print(
+            nameToJava(type.toString(), true) + "." + nameToJava(name.toString(), false) + "(");
         for (int i = 2; i < n.getChildCount(); i++) {
           if (i != 2) {
             out.print(", ");
@@ -2401,6 +2458,16 @@ public abstract class ToSource {
       out.print("(");
       visit(n.getChild(0), c, visitor);
       out.print(")");
+      return true;
+    }
+
+    @Override
+    protected boolean visitPrimitive(
+        CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
+      indent();
+      out.print("System.err.println(\"");
+      out.print(n.getChild(0).getValue());
+      out.println("\");");
       return true;
     }
 
@@ -2593,7 +2660,7 @@ public abstract class ToSource {
     @Override
     protected boolean visitCast(
         CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
-      out.print("(" + nameToJava(((CAstType) n.getChild(0).getValue()).getName()) + ") ");
+      out.print("(" + nameToJava(((CAstType) n.getChild(0).getValue()).getName(), true) + ") ");
       visit(n.getChild(1), c, visitor);
       return true;
     }
@@ -2616,7 +2683,7 @@ public abstract class ToSource {
         out.print(".");
       }
       if (n.getChild(1).getValue() instanceof String) {
-        out.print(nameToJava(n.getChild(1).getValue().toString()));
+        out.print(nameToJava(n.getChild(1).getValue().toString(), false));
       } else {
         visit(n.getChild(1), c, visitor);
       }
@@ -2629,7 +2696,7 @@ public abstract class ToSource {
       TypeReference type = (TypeReference) n.getChild(0).getValue();
       if (type.isArrayType()) {
         TypeReference eltType = type.getInnermostElementType();
-        out.print("new " + nameToJava(toSource(eltType).toString()));
+        out.print("new " + nameToJava(toSource(eltType).toString(), true));
         for (int i = 1; i < n.getChildCount(); i++) {
           out.print("[");
           visit(n.getChild(i), c, visitor);
@@ -2699,7 +2766,7 @@ public abstract class ToSource {
         }
 
         out.print(
-            nameToJava(toSource(m.getReference().getParameterType(i)).getName())
+            nameToJava(toSource(m.getReference().getParameterType(i)).getName(), true)
                 + " "
                 + root.toSourceName(root.mergePhis.find(i + (m.isStatic() ? 1 : 2))));
       }
@@ -2756,8 +2823,6 @@ public abstract class ToSource {
       inits.add(ast.getChild(0));
     }
 
-    ToJavaVisitor toJava = makeToJavaVisitor(ir, out, level, varTypes);
-
     for (int vn = ir.getSymbolTable().getNumberOfParameters() + 1;
         vn <= ir.getSymbolTable().getMaxValueNumber();
         vn++) {
@@ -2781,7 +2846,33 @@ public abstract class ToSource {
 
     ast = cast.makeNode(CAstNode.BLOCK_STMT, inits);
 
-    toJava.visit(ast, new CodeGenerationContext(types, root.mergePhis), toJava);
+    ToJavaVisitor toJava = makeToJavaVisitor(ir, out, level, varTypes);
+    toJava.visit(ast, new CodeGenerationContext(types, root.mergePhis, true), toJava);
+
+    ByteArrayOutputStream b;
+    try (PrintWriter o = new PrintWriter(b = new ByteArrayOutputStream())) {
+      CAstPattern.findAll(
+              CAstPattern.parse("|(EXPR_STMT(<expr>*)||DECL_STMT(VAR(<v>*),*,<expr>*))|"), ast)
+          .forEach(
+              s -> {
+                CAstNode e = (CAstNode) s.get("expr");
+                System.err.println("expr:: " + e);
+                ToJavaVisitor ev = makeToJavaVisitor(ir, o, level, varTypes);
+                try {
+                  if (s.containsKey("v")) {
+                    CAstNode v = (CAstNode) s.get("v");
+                    ev.visit(v, new CodeGenerationContext(types, root.mergePhis, true), ev);
+                    o.print(" = ");
+                  }
+                  ev.visit(e, new CodeGenerationContext(types, root.mergePhis, true), ev);
+                  o.print("\n");
+                  o.flush();
+                } catch (Throwable e1) {
+                  assert false : e1;
+                }
+              });
+    }
+    System.err.println(b.toString());
 
     if (m.isClinit() && (ast.getKind() != CAstNode.BLOCK_STMT || ast.getChildCount() == 1)) {
       out.println("  }");
@@ -2790,7 +2881,7 @@ public abstract class ToSource {
 
   protected ToJavaVisitor makeToJavaVisitor(
       IR ir, PrintWriter out, int level, Map<String, Object> varTypes) {
-    ToJavaVisitor toJava = makeToJavaVisitor(ir, out, level, varTypes);
+    ToJavaVisitor toJava = new ToJavaVisitor(level, ir, out, varTypes);
     return toJava;
   }
 
