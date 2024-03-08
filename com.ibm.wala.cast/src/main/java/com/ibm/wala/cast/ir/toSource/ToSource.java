@@ -207,6 +207,8 @@ public abstract class ToSource {
       return true;
     }
 
+    protected void didMerge(@SuppressWarnings("unused") SSAInstruction inst) {}
+
     private void gatherInstructions(
         Set<SSAInstruction> stuff,
         IR ir,
@@ -238,6 +240,7 @@ public abstract class ToSource {
 
       assert inst != null;
       if (inst.iIndex() <= limit && shouldMergeIfPossible(inst)) {
+        didMerge(inst);
         gatherInstructions(
             stuff, ir, du, regionInsts, inst, chunks, unmergeableValues, loopControl);
       }
