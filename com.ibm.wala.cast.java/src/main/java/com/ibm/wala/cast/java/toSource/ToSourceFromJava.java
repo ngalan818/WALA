@@ -19,6 +19,7 @@ import com.ibm.wala.shrike.shrikeCT.InvalidClassFileException;
 import com.ibm.wala.ssa.IR;
 import com.ibm.wala.ssa.ISSABasicBlock;
 import com.ibm.wala.ssa.SSAInstruction;
+import com.ibm.wala.types.MethodReference;
 import com.ibm.wala.types.TypeReference;
 import com.ibm.wala.util.collections.HashMapFactory;
 import com.ibm.wala.util.collections.HashSetFactory;
@@ -117,7 +118,11 @@ public class ToSourceFromJava extends ToSource {
   }
 
   @Override
-  public Set<File> toJava(CallGraph cg, File outDir, Predicate<CGNode> filter) {
+  public Set<File> toJava(
+      CallGraph cg,
+      File outDir,
+      Predicate<CGNode> filter,
+      Map<MethodReference, String> codeRecorder) {
     Map<IMethod, IR> code = HashMapFactory.make();
     cg.forEach(
         n -> {
@@ -208,7 +213,8 @@ public class ToSourceFromJava extends ToSource {
                           all.println("import " + key.fst + "." + nameToJava(key.snd, true) + ";");
                         }
                       },
-                      2);
+                      2,
+                      codeRecorder);
                 }
               }
               out.println("}");
