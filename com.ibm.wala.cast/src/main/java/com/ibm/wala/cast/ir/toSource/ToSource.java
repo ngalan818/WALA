@@ -100,6 +100,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintWriter;
+import java.io.StringWriter;
 import java.io.UTFDataFormatException;
 import java.util.Collection;
 import java.util.Collections;
@@ -119,6 +120,7 @@ import java.util.function.Predicate;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import org.apache.commons.io.output.TeeWriter;
 
 public abstract class ToSource {
 
@@ -2712,7 +2714,11 @@ public abstract class ToSource {
     }
   }
 
-  public abstract Set<File> toJava(CallGraph cg, File outDir, Predicate<CGNode> filter);
+  public abstract Set<File> toJava(
+      CallGraph cg,
+      File outDir,
+      Predicate<CGNode> filter,
+      Map<MethodReference, String> codeRecorder);
 
   public void toJava(
       IR ir,
@@ -2720,7 +2726,8 @@ public abstract class ToSource {
       TypeInference types,
       PrintWriter out,
       Consumer<CAstNode> includes,
-      int level) {
+      int level,
+      Map<MethodReference, String> codeRecorder) {
     PrunedCFG<SSAInstruction, ISSABasicBlock> cfg =
         ExceptionPrunedCFG.makeUncaught(ir.getControlFlowGraph());
     System.err.println(ir);
@@ -2760,7 +2767,11 @@ public abstract class ToSource {
       if (m.isInit()) {
         out.println(m.getDeclaringClass().getName().getClassName() + "(");
       } else {
-        out.print(toSource(m.getReturnType()).getName() + " " + m.getName() + "(");
+        out.print(
+            toSource(m.getReturnType()).getName()
+                + " "
+                + nameToJava(m.getName().toString(), false)
+                + "(");
       }
       for (int i = 0; i < m.getReference().getNumberOfParameters(); i++) {
         done.add(root.mergePhis.find(i + (m.isStatic() ? 1 : 2)));
@@ -2771,7 +2782,8 @@ public abstract class ToSource {
         out.print(
             nameToJava(toSource(m.getReference().getParameterType(i)).getName(), true)
                 + " "
-                + root.toSourceName(root.mergePhis.find(i + (m.isStatic() ? 1 : 2))));
+                + nameToJava(
+                    root.toSourceName(root.mergePhis.find(i + (m.isStatic() ? 1 : 2))), false));
       }
       out.print(") ");
       try {
@@ -2849,8 +2861,19 @@ public abstract class ToSource {
 
     ast = cast.makeNode(CAstNode.BLOCK_STMT, inits);
 
-    ToJavaVisitor toJava = makeToJavaVisitor(ir, out, level, varTypes);
-    toJava.visit(ast, new CodeGenerationContext(types, root.mergePhis, true), toJava);
+    try (StringWriter sw = new StringWriter()) {
+      PrintWriter pw = out;
+      if (codeRecorder != null) {
+        pw = new PrintWriter(new TeeWriter(out, sw));
+      }
+      ToJavaVisitor toJava = makeToJavaVisitor(ir, pw, level, varTypes);
+      toJava.visit(ast, new CodeGenerationContext(types, root.mergePhis, true), toJava);
+      if (codeRecorder != null) {
+        codeRecorder.put(ir.getMethod().getReference(), sw.getBuffer().toString());
+      }
+    } catch (IOException e) {
+      assert false : e;
+    }
 
     ByteArrayOutputStream b;
     try (PrintWriter o = new PrintWriter(b = new ByteArrayOutputStream())) {
