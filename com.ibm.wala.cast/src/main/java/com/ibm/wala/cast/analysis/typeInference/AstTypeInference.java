@@ -13,12 +13,14 @@ package com.ibm.wala.cast.analysis.typeInference;
 import com.ibm.wala.analysis.typeInference.ConeType;
 import com.ibm.wala.analysis.typeInference.TypeAbstraction;
 import com.ibm.wala.analysis.typeInference.TypeInference;
+import com.ibm.wala.analysis.typeInference.TypeVariable;
 import com.ibm.wala.cast.ir.ssa.AstAssertInstruction;
 import com.ibm.wala.cast.ir.ssa.AstEchoInstruction;
 import com.ibm.wala.cast.ir.ssa.AstGlobalRead;
 import com.ibm.wala.cast.ir.ssa.AstGlobalWrite;
 import com.ibm.wala.cast.ir.ssa.AstInstructionVisitor;
 import com.ibm.wala.cast.ir.ssa.AstIsDefinedInstruction;
+import com.ibm.wala.cast.ir.ssa.AstLexicalAccess.Access;
 import com.ibm.wala.cast.ir.ssa.AstLexicalRead;
 import com.ibm.wala.cast.ir.ssa.AstLexicalWrite;
 import com.ibm.wala.cast.ir.ssa.AstPropertyRead;
@@ -87,5 +89,20 @@ public abstract class AstTypeInference extends TypeInference {
   @Override
   protected void initialize() {
     init(ir, new TypeVarFactory(), new AstTypeOperatorFactory());
+  }
+
+  @Override
+  protected void initializeVariables() {
+    super.initializeVariables();
+    ir.iterateNormalInstructions()
+        .forEachRemaining(
+            inst -> {
+              if (inst instanceof AstLexicalRead) {
+                for (Access a : ((AstLexicalRead) inst).getAccesses()) {
+                  TypeVariable v = getVariable(a.valueNumber);
+                  v.setType(new ConeType(cha.lookupClass(a.type)));
+                }
+              }
+            });
   }
 }

@@ -2763,9 +2763,7 @@ public abstract class JDTJava2CAstTranslator<T extends Position> implements Tran
             CAstNode.DECL_STMT,
             fFactory.makeConstant(
                 new InternalCAstSymbol(
-                    var,
-                    fTypeDict.getCAstTypeFor(n.getThenExpression().resolveTypeBinding()),
-                    true)));
+                    var, fTypeDict.getCAstTypeFor(n.resolveTypeBinding()), true)));
 
     context.addNameDecl(declNode);
 

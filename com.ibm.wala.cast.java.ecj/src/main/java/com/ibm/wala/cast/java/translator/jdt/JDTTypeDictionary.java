@@ -98,6 +98,13 @@ public class JDTTypeDictionary extends CAstTypeDictionaryImpl<ITypeBinding> {
         type = JavaPrimitiveTypeMap.lookupType(jdtType.getName());
       } else if (jdtType.isArray()) {
         type = new JdtJavaArrayType(jdtType);
+      } else if (jdtType.isTypeVariable()) {
+        ITypeBinding[] bounds = jdtType.getTypeBounds();
+        if (bounds != null && bounds.length == 1) {
+          return getCAstTypeFor(bounds[0]);
+        } else {
+          return getCAstTypeFor(fAst.resolveWellKnownType("java.lang.Object"));
+        }
       } else
         Assertions.UNREACHABLE(
             "getCAstTypeFor() passed type that is not primitive, array, or class?");

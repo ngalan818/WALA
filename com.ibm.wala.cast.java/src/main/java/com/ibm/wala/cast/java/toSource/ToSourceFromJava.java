@@ -1,6 +1,7 @@
 package com.ibm.wala.cast.java.toSource;
 
 import com.ibm.wala.analysis.typeInference.TypeInference;
+import com.ibm.wala.cast.ir.ssa.AstIRFactory;
 import com.ibm.wala.cast.ir.toSource.ToSource;
 import com.ibm.wala.cast.java.analysis.typeInference.AstJavaTypeInference;
 import com.ibm.wala.cast.java.ssa.AstJavaInstructionVisitor;
@@ -11,14 +12,15 @@ import com.ibm.wala.cast.tree.CAstNode;
 import com.ibm.wala.classLoader.IClass;
 import com.ibm.wala.classLoader.IField;
 import com.ibm.wala.classLoader.IMethod;
-import com.ibm.wala.ipa.callgraph.CGNode;
-import com.ibm.wala.ipa.callgraph.CallGraph;
+import com.ibm.wala.ipa.callgraph.impl.Everywhere;
 import com.ibm.wala.ipa.cfg.PrunedCFG;
 import com.ibm.wala.ipa.cha.IClassHierarchy;
 import com.ibm.wala.shrike.shrikeCT.InvalidClassFileException;
 import com.ibm.wala.ssa.IR;
+import com.ibm.wala.ssa.IRFactory;
 import com.ibm.wala.ssa.ISSABasicBlock;
 import com.ibm.wala.ssa.SSAInstruction;
+import com.ibm.wala.ssa.SSAOptions;
 import com.ibm.wala.types.MethodReference;
 import com.ibm.wala.types.TypeReference;
 import com.ibm.wala.util.collections.HashMapFactory;
@@ -119,20 +121,29 @@ public class ToSourceFromJava extends ToSource {
 
   @Override
   public Set<File> toJava(
-      CallGraph cg,
+      IClassHierarchy cha,
       File outDir,
-      Predicate<CGNode> filter,
+      Predicate<IClass> filter,
       Map<MethodReference, String> codeRecorder) {
+    IRFactory<IMethod> irs = AstIRFactory.makeDefaultFactory();
+
     Map<IMethod, IR> code = HashMapFactory.make();
-    cg.forEach(
+    cha.forEach(
         n -> {
           if (filter.test(n)) {
-            code.put(n.getMethod(), n.getIR());
+            n.getDeclaredMethods()
+                .forEach(
+                    m -> {
+                      if (!m.isAbstract()) {
+                        code.put(
+                            m, irs.makeIR(m, Everywhere.EVERYWHERE, SSAOptions.defaultOptions()));
+                      }
+                    });
           }
         });
 
     Set<File> files = HashSetFactory.make();
-    for (IClass cls : cg.getClassHierarchy()) {
+    for (IClass cls : cha) {
       if (cls instanceof AstClass) {
         String clsName = nameToJava(cls.getName().toString().substring(1), true);
         File f = new File(outDir, clsName + ".java");
@@ -200,7 +211,7 @@ public class ToSourceFromJava extends ToSource {
                   System.err.println(types);
                   toJava(
                       ir,
-                      cg.getClassHierarchy(),
+                      cha,
                       types,
                       out,
                       (i) -> {

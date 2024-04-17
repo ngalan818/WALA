@@ -31,16 +31,16 @@ import com.ibm.wala.cast.util.CAstPattern;
 import com.ibm.wala.cfg.ControlFlowGraph;
 import com.ibm.wala.cfg.Util;
 import com.ibm.wala.cfg.cdg.ControlDependenceGraph;
+import com.ibm.wala.classLoader.IClass;
 import com.ibm.wala.classLoader.IMethod;
 import com.ibm.wala.core.util.strings.Atom;
-import com.ibm.wala.ipa.callgraph.CGNode;
-import com.ibm.wala.ipa.callgraph.CallGraph;
 import com.ibm.wala.ipa.cfg.ExceptionPrunedCFG;
 import com.ibm.wala.ipa.cfg.PrunedCFG;
 import com.ibm.wala.ipa.cha.IClassHierarchy;
 import com.ibm.wala.shrike.shrikeBT.IBinaryOpInstruction;
 import com.ibm.wala.shrike.shrikeBT.IBinaryOpInstruction.IOperator;
 import com.ibm.wala.shrike.shrikeBT.IConditionalBranchInstruction;
+import com.ibm.wala.shrike.shrikeBT.IShiftInstruction;
 import com.ibm.wala.shrike.shrikeBT.IUnaryOpInstruction;
 import com.ibm.wala.shrike.shrikeCT.InvalidClassFileException;
 import com.ibm.wala.ssa.DefUse;
@@ -592,7 +592,7 @@ public abstract class ToSource {
     private final SSAInstruction r;
     private final ISSABasicBlock l;
     private final ControlDependenceGraph<ISSABasicBlock> cdg;
-    private final IR ir;
+    protected final IR ir;
     private BasicNaturalRelation livenessConflicts;
     protected final Map<Integer, String> sourceNames;
     protected final Map<SSAInstruction, Map<ISSABasicBlock, RegionTreeNode>> children =
@@ -1575,6 +1575,22 @@ public abstract class ToSource {
 
           CAstOperator op = null;
           IOperator operator = instruction.getOperator();
+          if (operator instanceof IShiftInstruction.Operator) {
+            switch ((IShiftInstruction.Operator) operator) {
+              case SHL:
+                op = CAstOperator.OP_LSH;
+                break;
+              case SHR:
+                op = CAstOperator.OP_RSH;
+                break;
+              case USHR:
+                op = CAstOperator.OP_URSH;
+                break;
+              default:
+                assert false;
+                break;
+            }
+          }
           if (operator instanceof IBinaryOpInstruction.Operator) {
             switch ((IBinaryOpInstruction.Operator) operator) {
               case ADD:
@@ -2622,13 +2638,27 @@ public abstract class ToSource {
         case "+":
         case "-":
           return 5;
+        case "<<":
+        case ">>":
+        case ">>>":
+          return 7;
         case "==":
         case "<":
         case ">":
         case "<=":
         case ">=":
         case "!=":
-          return 7;
+          return 9;
+        case "&":
+          return 11;
+        case "^":
+          return 13;
+        case "|":
+          return 15;
+        case "&&":
+          return 17;
+        case "||":
+          return 19;
         default:
           assert false : "unknown " + operator;
           return -1;
@@ -2715,9 +2745,9 @@ public abstract class ToSource {
   }
 
   public abstract Set<File> toJava(
-      CallGraph cg,
+      IClassHierarchy cha,
       File outDir,
-      Predicate<CGNode> filter,
+      Predicate<IClass> filter,
       Map<MethodReference, String> codeRecorder);
 
   public void toJava(

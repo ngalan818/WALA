@@ -17,6 +17,7 @@ import com.ibm.wala.analysis.typeInference.PrimitiveType;
 import com.ibm.wala.analysis.typeInference.TypeAbstraction;
 import com.ibm.wala.analysis.typeInference.TypeVariable;
 import com.ibm.wala.cast.analysis.typeInference.AstTypeInference;
+import com.ibm.wala.cast.ir.ssa.AstLexicalRead;
 import com.ibm.wala.cast.ir.ssa.CAstBinaryOp;
 import com.ibm.wala.cast.java.ssa.AstJavaInstructionVisitor;
 import com.ibm.wala.cast.java.ssa.AstJavaInvokeInstruction;
@@ -63,6 +64,12 @@ public class AstJavaTypeInference extends AstTypeInference {
       } else {
         result = new DeclaredTypeOperator(new ConeType(klass));
       }
+    }
+
+    @Override
+    public void visitAstLexicalRead(AstLexicalRead inst) {
+      // inst.getAccesses()[0].
+      result = new DeclaredTypeOperator(new ConeType(cha.getRootClass()));
     }
 
     @Override

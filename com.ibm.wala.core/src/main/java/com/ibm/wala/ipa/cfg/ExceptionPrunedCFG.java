@@ -48,7 +48,9 @@ public class ExceptionPrunedCFG {
         new ExceptionEdgePruner<I, T>(cfg) {
           @Override
           public boolean hasExceptionalEdge(T src, T dst) {
-            return dst.isExitBlock() ? false : cfg.getExceptionalSuccessors(src).contains(dst);
+            return dst.isExitBlock()
+                ? !cfg.getNormalSuccessors(src).isEmpty()
+                : cfg.getExceptionalSuccessors(src).contains(dst);
           }
         });
   }
