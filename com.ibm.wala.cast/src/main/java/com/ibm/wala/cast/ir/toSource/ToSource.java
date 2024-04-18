@@ -1477,6 +1477,7 @@ public abstract class ToSource {
                           .match(d, null));
         }
 
+        @SuppressWarnings("unused")
         private boolean checkDecl(int def) {
           return ST.getNumberOfParameters() < def
               && checkDecls(def, decls)
@@ -1510,6 +1511,7 @@ public abstract class ToSource {
                   && inst.hasDef()
                   && du.getNumberOfUses(vn) > 1) {
 
+                /*
                 if (checkDecl(mergePhis.find(vn))) {
                   decls.add(
                       ast.makeNode(
@@ -1517,6 +1519,7 @@ public abstract class ToSource {
                           ast.makeNode(CAstNode.VAR, makeVariableName(vn)),
                           ast.makeConstant(toSource(c.getTypes().getType(vn).getTypeReference()))));
                 }
+                */
 
                 return ast.makeNode(
                     CAstNode.BLOCK_EXPR,
@@ -1771,6 +1774,9 @@ public abstract class ToSource {
         @Override
         public void visitConditionalBranch(SSAConditionalBranchInstruction instruction) {
           assert children.containsKey(instruction) : "children of " + instruction + ":" + children;
+          Map<ISSABasicBlock, RegionTreeNode> cc = children.get(instruction);
+          ISSABasicBlock branchBB = cfg.getBlockForInstruction(instruction.iIndex());
+
           Set<SSAInstruction> testInsts;
           CAstOperator castOp = null;
           IConditionalBranchInstruction.IOperator op = instruction.getOperator();
@@ -1811,15 +1817,17 @@ public abstract class ToSource {
                 test = v1;
                 break test;
               } else if (castOp == CAstOperator.OP_EQ) {
-                test = ast.makeNode(CAstNode.UNARY_EXPR, CAstOperator.OP_NOT, v1);
+                if (loopControls.contains(branchBB)) {
+                  test = v1;
+                } else {
+                  test = ast.makeNode(CAstNode.UNARY_EXPR, CAstOperator.OP_NOT, v1);
+                }
                 break test;
               }
             }
             test = ast.makeNode(CAstNode.BINARY_EXPR, castOp, v1, v2);
           }
 
-          Map<ISSABasicBlock, RegionTreeNode> cc = children.get(instruction);
-          ISSABasicBlock branchBB = cfg.getBlockForInstruction(instruction.iIndex());
           if (loopControls.contains(branchBB)) {
             assert cc.size() <= 2;
 
