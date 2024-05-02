@@ -168,7 +168,7 @@ public class SourceBuffer {
             }
           } else {
             if (p.getLastLine() == line) {
-              lines.add(currentLine.substring(0, p.getLastCol()));
+              lines.add(currentLine.substring(0, p.getLastCol() + 1));
               endColumn = p.getLastCol();
               endLine = line;
               endOffset = offset - (currentLine.length() - p.getLastCol());
