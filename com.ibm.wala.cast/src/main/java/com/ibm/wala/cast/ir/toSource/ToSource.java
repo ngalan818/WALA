@@ -51,6 +51,8 @@ import com.ibm.wala.ssa.SSAArrayLengthInstruction;
 import com.ibm.wala.ssa.SSAArrayLoadInstruction;
 import com.ibm.wala.ssa.SSAArrayStoreInstruction;
 import com.ibm.wala.ssa.SSABinaryOpInstruction;
+import com.ibm.wala.ssa.SSACFG;
+import com.ibm.wala.ssa.SSACFG.BasicBlock;
 import com.ibm.wala.ssa.SSACheckCastInstruction;
 import com.ibm.wala.ssa.SSAComparisonInstruction;
 import com.ibm.wala.ssa.SSAConditionalBranchInstruction;
@@ -1164,6 +1166,10 @@ public abstract class ToSource {
                               (inst instanceof SSAConditionalBranchInstruction)
                                       && loopControls.contains(
                                           cfg.getBlockForInstruction(inst.iIndex()))
+                                      // If it's a while loop then merge instructions in test
+                                      // otherwise return null then the instructions will be translated
+                                      // into several lines and might be placed in different places
+                                      && isWhileLoop(inst, unmergeableValues)
                                   ? inst
                                   : null);
                       if (insts.isEmpty()) {
@@ -1230,6 +1236,40 @@ public abstract class ToSource {
               });
 
       initChildren();
+    }
+
+    // detect the loop type, in this case only care about if it's a normal while loop
+    private boolean isWhileLoop(SSAInstruction inst, IntSet unmergeableValues) {
+      Set<SSAInstruction> insts = HashSetFactory.make();
+      List<SSAInstruction> regionInsts = new LinkedList<>();
+      cfg.getBlockForInstruction(inst.iIndex())
+          .forEach(
+              iinst -> {
+                if (iinst.iIndex() >= 0) {
+                  regionInsts.add(iinst);
+                }
+              });
+      makeTreeBuilder(ir, cha, cfg, cdg)
+          .gatherInstructions(
+              insts,
+              ir,
+              du,
+              regionInsts,
+              inst,
+              new Heap<List<SSAInstruction>>(regionInsts.size()) {
+
+                @Override
+                protected boolean compareElements(
+                    List<SSAInstruction> elt1, List<SSAInstruction> elt2) {
+                  return false;
+                }
+              },
+              unmergeableValues,
+              (inst instanceof SSAConditionalBranchInstruction)
+                      && loopControls.contains(cfg.getBlockForInstruction(inst.iIndex()))
+                  ? inst
+                  : null);
+      return insts.containsAll(regionInsts);
     }
 
     private void initChildren() {
@@ -1814,7 +1854,8 @@ public abstract class ToSource {
         public void visitConditionalBranch(SSAConditionalBranchInstruction instruction) {
           assert children.containsKey(instruction) : "children of " + instruction + ":" + children;
           Map<ISSABasicBlock, RegionTreeNode> cc = children.get(instruction);
-          ISSABasicBlock branchBB = cfg.getBlockForInstruction(instruction.iIndex());
+          SSACFG.BasicBlock branchBB =
+              (BasicBlock) cfg.getBlockForInstruction(instruction.iIndex());
 
           Set<SSAInstruction> testInsts;
           CAstOperator castOp = null;
@@ -1869,6 +1910,34 @@ public abstract class ToSource {
 
           if (loopControls.contains(branchBB)) {
             assert cc.size() <= 2;
+
+            // it's a temporary solution to have a boolean flag for do while loop
+            boolean isDoWhile = false;
+            // determine loop type and print them out for now
+            loopType:
+            {
+              Set<SSAInstruction> covered = HashSetFactory.make(testInsts);
+              covered.add(instruction);
+              Set<SSAInstruction> bbInsts =
+                  IteratorUtil.streamify(branchBB.iterateNormalInstructions())
+                      .collect(Collectors.toSet());
+              if (loopControls.contains(branchBB)
+                  && loopHeaders.contains(branchBB)
+                  && covered.containsAll(bbInsts)) {
+                System.err.println("while loop");
+                break loopType;
+              }
+
+              for (ISSABasicBlock sb : cfg.getNormalSuccessors(branchBB)) {
+                if (loopHeaders.contains(thruTrampolineBlocks(sb))) {
+                  System.err.println("do loop");
+                  isDoWhile = true;
+                  break loopType;
+                }
+              }
+
+              System.err.println("ugly loop");
+            }
 
             // Find out the successor of the loop control block
             ISSABasicBlock body = getLoopSuccessor(branchBB);
@@ -1947,7 +2016,9 @@ public abstract class ToSource {
                     CAstNode.LOOP,
                     test,
                     ast.makeNode(
-                        CAstNode.BLOCK_STMT, loopBlock.toArray(new CAstNode[loopBlock.size()])));
+                        CAstNode.BLOCK_STMT, loopBlock.toArray(new CAstNode[loopBlock.size()])),
+                    // reuse LOOP type but add third child as a boolean to tell if it's a do while loop
+                    ast.makeConstant(isDoWhile));
 
             ISSABasicBlock next = cfg.getBlockForInstruction(instruction.getTarget());
             node = checkLinePhi(node, instruction, next);
@@ -2024,6 +2095,25 @@ public abstract class ToSource {
                       notTakenStmt);
             }
           }
+        }
+
+        private ISSABasicBlock thruTrampolineBlocks(ISSABasicBlock bb) {
+          Iterator<SSAInstruction> insts = bb.iterator();
+          if (insts.hasNext()) {
+            SSAInstruction inst = insts.next();
+            if (!insts.hasNext() && inst instanceof SSAGotoInstruction) {
+              ISSABasicBlock nb =
+                  cfg.getBlockForInstruction(((SSAGotoInstruction) inst).getTarget());
+              ISSABasicBlock nnb = thruTrampolineBlocks(nb);
+              if (nnb != null) {
+                return nnb;
+              } else {
+                return nb;
+              }
+            }
+          }
+
+          return null;
         }
 
         private List<CAstNode> handleBlock(
@@ -2581,11 +2671,24 @@ public abstract class ToSource {
         CAstNode n, CodeGenerationContext c, CAstVisitor<CodeGenerationContext> visitor) {
       ToJavaVisitor cv = makeToJavaVisitor(ir, out, indent + 1, varTypes);
       indent();
-      out.print("while (");
-      cv.visit(n.getChild(0), c, visitor);
-      out.println(")");
-      cv.visit(n.getChild(1), c, cv);
-      return true;
+
+      // If it's do while loop, then genarate do{}while();
+      // otherwise keep what's be done already, that's while(){};
+      if (n.getChildCount() > 2 && n.getChild(2).getValue().equals(java.lang.Boolean.TRUE)) {
+        out.println("do ");
+        cv.visit(n.getChild(1), c, cv);
+        indent();
+        out.print("while (");
+        cv.visit(n.getChild(0), c, visitor);
+        out.println(");");
+        return true;
+      } else {
+        out.print("while (");
+        cv.visit(n.getChild(0), c, visitor);
+        out.println(")");
+        cv.visit(n.getChild(1), c, cv);
+        return true;
+      }
     }
 
     @Override
