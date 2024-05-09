@@ -113,7 +113,9 @@ public abstract class SSAInstruction {
 
     default void visitLoadMetadata(SSALoadMetadataInstruction instruction) {}
 
-    default void visitUnspecified(SSAUnspecifiedInstruction instruction) {}
+    default <T> void visitUnspecified(SSAUnspecifiedInstruction<T> instruction) {}
+
+    default <T> void visitUnspecifiedExpr(SSAUnspecifiedExprInstruction<T> instruction) {}
   }
 
   /** A base visitor implementation that does nothing. */
