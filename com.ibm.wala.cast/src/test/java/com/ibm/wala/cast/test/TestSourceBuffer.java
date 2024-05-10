@@ -131,27 +131,33 @@ public class TestSourceBuffer {
   }
   
   @Test
-  public void testSingleLineNoPeriod() throws IOException {
-    // position of "IF WS-INPUT = 0" [3:12] -> [3:26] (1-base indexing)
-    Position position = mockPosition(3, 12, 3, 26, -1, -1);
+  public void testSingleLineOmitPeriod() throws IOException {
+    // position of "ACCEPT WS-INPUT" [2:12] -> [2:26] (1-base indexing)
+    Position position = mockPosition(2, 12, 2, 26, -1, -1);
 
     String sourceBufferString = new SourceBuffer(position).toString();
-    testEqualString(sourceBufferString, "IF WS-INPUT = 0");
+    testEqualString(sourceBufferString, "ACCEPT WS-INPUT");
   }
 
   @Test
-  public void testMultiLineNoPeriod() throws IOException {
+  public void testMultiLineOmitPeriod() throws IOException {
     /* position of "
        IF WS-INPUT = 0
-       GO TO IS-ZERO" [3:12] -> [4:24] (1-base indexing)
+       GO TO IS-ZERO
+       ELSE
+       GO TO END-PROGRAM" [3:12] -> [6:28] (1-base indexing)
     */
-    Position position = mockPosition(3, 12, 4, 24, -1, -1);
+    Position position = mockPosition(3, 12, 6, 28, -1, -1);
 
     String sourceBufferString = new SourceBuffer(position).toString();
     testEqualString(
         sourceBufferString,
         "IF WS-INPUT = 0\n"
             + INDENT
-            + "GO TO IS-ZERO");
+            + "GO TO IS-ZERO\n"
+            + INDENT
+            + "ELSE\n"
+            + INDENT
+            + "GO TO END-PROGRAM");
   }
 }

@@ -142,7 +142,11 @@ public class SourceBuffer {
             }
           }
         } else {
-          lines.add(currentLine.substring(Math.max(p.getFirstCol(), 0)));
+          if (p.getLastLine() > p.getFirstLine()) {
+            lines.add(currentLine.substring(Math.max(p.getFirstCol(), 0)));
+          } else {
+            lines.add(currentLine.substring(Math.max(p.getFirstCol(), 0), p.getLastCol() + 1));
+          }
           startColumn = p.getFirstCol();
         }
 
