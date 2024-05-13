@@ -45,7 +45,6 @@ import com.ibm.wala.ssa.SSAPiInstruction;
 import com.ibm.wala.ssa.SSAStoreIndirectInstruction;
 import com.ibm.wala.ssa.SSAUnaryOpInstruction;
 import com.ibm.wala.ssa.SSAUnspecifiedExprInstruction;
-import com.ibm.wala.ssa.SSAUnspecifiedInstruction;
 import com.ibm.wala.ssa.SymbolTable;
 import com.ibm.wala.types.TypeReference;
 import com.ibm.wala.util.CancelException;

@@ -13,10 +13,8 @@ package com.ibm.wala.ssa;
 import com.ibm.wala.types.TypeReference;
 
 /**
- * {@inheritDoc}
- *
- * <p>The Expression variant of Unspecified Instruction behaves as its parent, and assigns the
- * result of computing the opaque payload to a value.
+ * The Expression variant of Unspecified Instruction behaves as its parent, and assigns the result
+ * of computing the opaque payload to a value.
  *
  * @param <T> The type of the payload.
  */
@@ -48,7 +46,8 @@ public class SSAUnspecifiedExprInstruction<T> extends SSAUnspecifiedInstruction<
   public SSAInstruction copyForSSA(SSAInstructionFactory insts, int[] defs, int[] uses)
       throws IllegalArgumentException {
     assert (uses == null) : "Expected no uses in " + this.getClass().getSimpleName();
-    return insts.UnspecifiedExprInstruction(iIndex(), defs == null ? result : defs[0], type, getPayload());
+    return insts.UnspecifiedExprInstruction(
+        iIndex(), defs == null ? result : defs[0], type, getPayload());
   }
 
   @Override

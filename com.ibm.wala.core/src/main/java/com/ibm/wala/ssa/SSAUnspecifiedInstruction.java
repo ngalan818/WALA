@@ -11,8 +11,9 @@
 package com.ibm.wala.ssa;
 
 /**
- * Unspecified Instructions are opaque values containing a payload of type T. Their CAst representation is a primitive
- * node with the payload as a constant value.
+ * Unspecified Instructions are opaque values containing a payload of type T. Their CAst
+ * representation is a primitive node with the payload as a constant value.
+ *
  * @param <T> The type of the payload.
  */
 public class SSAUnspecifiedInstruction<T> extends SSAInstruction {
