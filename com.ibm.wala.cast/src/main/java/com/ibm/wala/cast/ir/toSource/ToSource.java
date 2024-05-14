@@ -1911,9 +1911,8 @@ public abstract class ToSource {
           if (loopControls.contains(branchBB)) {
             assert cc.size() <= 2;
 
-            // it's a temporary solution to have a boolean flag for do while loop
-            boolean isDoWhile = false;
-            // determine loop type and print them out for now
+            LoopType loopType = null;
+            // determine loop type
             loopType:
             {
               Set<SSAInstruction> covered = HashSetFactory.make(testInsts);
@@ -1925,18 +1924,20 @@ public abstract class ToSource {
                   && loopHeaders.contains(branchBB)
                   && covered.containsAll(bbInsts)) {
                 System.err.println("while loop");
+                loopType = LoopType.WHILE;
                 break loopType;
               }
 
               for (ISSABasicBlock sb : cfg.getNormalSuccessors(branchBB)) {
                 if (loopHeaders.contains(thruTrampolineBlocks(sb))) {
                   System.err.println("do loop");
-                  isDoWhile = true;
+                  loopType = LoopType.DOWHILE;
                   break loopType;
                 }
               }
 
               System.err.println("ugly loop");
+              loopType = LoopType.WHILETRUE;
             }
 
             // Find out the successor of the loop control block
@@ -1949,20 +1950,24 @@ public abstract class ToSource {
               test = ast.makeNode(CAstNode.UNARY_EXPR, CAstOperator.OP_NOT, test);
             }
 
-            List<List<SSAInstruction>> loopChunks = new LinkedList<>();
+            // Chunks in loop body
+            List<List<SSAInstruction>> loopChunks = regionChunks.get(Pair.make(instruction, body));
             // add the chucks belongs to control header but not in conditional branch
             // they are ignored when translating CAst
+            List<List<SSAInstruction>> loopChunksInLoopControl = new LinkedList<>();
             List<List<SSAInstruction>> chunks = regionChunks.get(Pair.make(r, l));
             chunks.forEach(
                 chunkInsts -> {
                   if (!gotoChunk(chunkInsts) && shouldBeLoopBody(chunkInsts)) {
-                    loopChunks.add(chunkInsts);
+                    loopChunksInLoopControl.add(chunkInsts);
                   }
                 });
-            // Add those chunks along with loop body
-            loopChunks.addAll(regionChunks.get(Pair.make(instruction, body)));
 
             RegionTreeNode lr = cc.get(body);
+            List<CAstNode> loopBlockInLoopControl =
+                loopChunksInLoopControl.size() > 0
+                    ? handleBlock(loopChunksInLoopControl, lr, false)
+                    : null;
             List<CAstNode> loopBlock = handleBlock(loopChunks, lr, false);
 
             System.err.println("loop test insts: " + testInsts);
@@ -2011,14 +2016,54 @@ public abstract class ToSource {
             //              loopBlock = hb;
             //            }
 
+            // Generate loop body per loop type
+            CAstNode bodyNodes = null;
+            if (LoopType.DOWHILE.equals(loopType)) {
+              // if it's do while loop, use loopBlock and loopBlockInLoopControl
+              if (loopBlockInLoopControl == null) {
+                loopBlockInLoopControl = loopBlock;
+              } else {
+                loopBlockInLoopControl.addAll(loopBlock);
+              }
+              bodyNodes =
+                  ast.makeNode(
+                      CAstNode.BLOCK_STMT,
+                      loopBlockInLoopControl.toArray(new CAstNode[loopBlockInLoopControl.size()]));
+            } else if (LoopType.WHILETRUE.equals(loopType)) {
+              // if it's ugly loop, put test as if-statement into body
+              CAstNode ifStmt =
+                  ast.makeNode(
+                      CAstNode.IF_STMT,
+                      ast.makeNode(CAstNode.UNARY_EXPR, CAstOperator.OP_NOT, test),
+                      ast.makeNode(CAstNode.BREAK),
+                      loopBlock.toArray(new CAstNode[loopBlock.size()]));
+              if (loopBlockInLoopControl == null) {
+                bodyNodes = ast.makeNode(CAstNode.BLOCK_STMT, ifStmt);
+              } else {
+                loopBlockInLoopControl.add(ifStmt);
+                bodyNodes =
+                    ast.makeNode(
+                        CAstNode.BLOCK_STMT,
+                        loopBlockInLoopControl.toArray(
+                            new CAstNode[loopBlockInLoopControl.size()]));
+              }
+
+              test = ast.makeConstant(true);
+            } else {
+              // for normal while loop, use loopBlock
+              bodyNodes =
+                  ast.makeNode(
+                      CAstNode.BLOCK_STMT, loopBlock.toArray(new CAstNode[loopBlock.size()]));
+            }
+
             node =
                 ast.makeNode(
                     CAstNode.LOOP,
                     test,
-                    ast.makeNode(
-                        CAstNode.BLOCK_STMT, loopBlock.toArray(new CAstNode[loopBlock.size()])),
-                    // reuse LOOP type but add third child as a boolean to tell if it's a do while loop
-                    ast.makeConstant(isDoWhile));
+                    bodyNodes,
+                    // reuse LOOP type but add third child as a boolean to tell if it's a do while
+                    // loop
+                    ast.makeConstant(LoopType.DOWHILE.equals(loopType)));
 
             ISSABasicBlock next = cfg.getBlockForInstruction(instruction.getTarget());
             node = checkLinePhi(node, instruction, next);
