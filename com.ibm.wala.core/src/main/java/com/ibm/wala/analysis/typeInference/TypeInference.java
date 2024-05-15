@@ -44,6 +44,7 @@ import com.ibm.wala.ssa.SSAPhiInstruction;
 import com.ibm.wala.ssa.SSAPiInstruction;
 import com.ibm.wala.ssa.SSAStoreIndirectInstruction;
 import com.ibm.wala.ssa.SSAUnaryOpInstruction;
+import com.ibm.wala.ssa.SSAUnspecifiedExprInstruction;
 import com.ibm.wala.ssa.SymbolTable;
 import com.ibm.wala.types.TypeReference;
 import com.ibm.wala.util.CancelException;
@@ -693,6 +694,25 @@ public class TypeInference extends SSAInference<TypeVariable> implements FixedPo
     @Override
     public void visitStoreIndirect(SSAStoreIndirectInstruction instruction) {
       Assertions.UNREACHABLE();
+    }
+
+    @Override
+    public <T> void visitUnspecifiedExpr(SSAUnspecifiedExprInstruction<T> instruction) {
+      TypeReference type = instruction.getResultType();
+      if (doPrimitives && type.isPrimitiveType()) {
+        PrimitiveType p = language.getPrimitive(type);
+        assert (p != null) : "no primitive type for " + type;
+        result = new DeclaredTypeOperator(p);
+      } else {
+        IClass klass = cha.lookupClass(type);
+        if (klass == null) {
+          // get from a field of a type that cannot be loaded.
+          // be pessimistic
+          result = new DeclaredTypeOperator(BOTTOM);
+        } else {
+          result = new DeclaredTypeOperator(new ConeType(klass));
+        }
+      }
     }
   }
 

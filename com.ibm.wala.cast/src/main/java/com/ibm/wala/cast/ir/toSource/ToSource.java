@@ -73,6 +73,7 @@ import com.ibm.wala.ssa.SSAReturnInstruction;
 import com.ibm.wala.ssa.SSASwitchInstruction;
 import com.ibm.wala.ssa.SSAThrowInstruction;
 import com.ibm.wala.ssa.SSAUnaryOpInstruction;
+import com.ibm.wala.ssa.SSAUnspecifiedExprInstruction;
 import com.ibm.wala.ssa.SSAUnspecifiedInstruction;
 import com.ibm.wala.ssa.SymbolTable;
 import com.ibm.wala.types.FieldReference;
@@ -145,7 +146,9 @@ public abstract class ToSource {
     if ((inst instanceof SSABinaryOpInstruction)
         || (inst instanceof SSAUnaryOpInstruction)
         || (inst instanceof SSAComparisonInstruction)
-        || (inst instanceof SSAConversionInstruction)) {
+        || (inst instanceof SSAConversionInstruction)
+        || (inst instanceof SSAUnspecifiedExprInstruction)
+    ) {
       return true;
     } else if (inst instanceof SSAAbstractInvokeInstruction) {
       MethodReference method = ((SSAAbstractInvokeInstruction) inst).getDeclaredTarget();
@@ -2430,10 +2433,13 @@ public abstract class ToSource {
         }
 
         @Override
-        public void visitUnspecified(SSAUnspecifiedInstruction instruction) {
-          node =
-              ast.makeNode(
-                  CAstNode.PRIMITIVE, ast.makeConstant(instruction.getPayload().toString()));
+        public <T> void visitUnspecified(SSAUnspecifiedInstruction<T> instruction) {
+          node = ast.makeNode(CAstNode.PRIMITIVE, ast.makeConstant(instruction.getPayload()));
+        }
+
+        @Override
+        public <T> void visitUnspecifiedExpr(SSAUnspecifiedExprInstruction<T> instruction) {
+          node = ast.makeNode(CAstNode.PRIMITIVE, ast.makeConstant(instruction.getPayload()));
         }
       }
 

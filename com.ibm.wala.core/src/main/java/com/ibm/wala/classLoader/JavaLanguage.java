@@ -74,6 +74,7 @@ import com.ibm.wala.ssa.SSAStoreIndirectInstruction;
 import com.ibm.wala.ssa.SSASwitchInstruction;
 import com.ibm.wala.ssa.SSAThrowInstruction;
 import com.ibm.wala.ssa.SSAUnaryOpInstruction;
+import com.ibm.wala.ssa.SSAUnspecifiedExprInstruction;
 import com.ibm.wala.types.ClassLoaderReference;
 import com.ibm.wala.types.Descriptor;
 import com.ibm.wala.types.FieldReference;
@@ -395,6 +396,12 @@ public class JavaLanguage extends LanguageImpl implements BytecodeLanguage, Cons
     public SSAUnaryOpInstruction UnaryOpInstruction(
         int iindex, IUnaryOpInstruction.IOperator operator, int result, int val) {
       return new SSAUnaryOpInstruction(iindex, operator, result, val);
+    }
+
+    @Override
+    public <T> SSAUnspecifiedExprInstruction<T> UnspecifiedExprInstruction(
+            int iindex, int result, TypeReference resultType, T payload) {
+      return new SSAUnspecifiedExprInstruction<>(iindex, result, resultType, payload);
     }
 
     @Override
