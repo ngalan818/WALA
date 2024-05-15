@@ -1167,7 +1167,8 @@ public abstract class ToSource {
                                       && loopControls.contains(
                                           cfg.getBlockForInstruction(inst.iIndex()))
                                       // If it's a while loop then merge instructions in test
-                                      // otherwise return null then the instructions will be translated
+                                      // otherwise return null then the instructions will be
+                                      // translated
                                       // into several lines and might be placed in different places
                                       && isWhileLoop(inst, unmergeableValues)
                                   ? inst
@@ -2036,7 +2037,9 @@ public abstract class ToSource {
                       CAstNode.IF_STMT,
                       ast.makeNode(CAstNode.UNARY_EXPR, CAstOperator.OP_NOT, test),
                       ast.makeNode(CAstNode.BREAK),
-                      loopBlock.toArray(new CAstNode[loopBlock.size()]));
+                      // it should be a block instead of array of AST nodes
+                      ast.makeNode(
+                          CAstNode.BLOCK_STMT, loopBlock.toArray(new CAstNode[loopBlock.size()])));
               if (loopBlockInLoopControl == null) {
                 bodyNodes = ast.makeNode(CAstNode.BLOCK_STMT, ifStmt);
               } else {
