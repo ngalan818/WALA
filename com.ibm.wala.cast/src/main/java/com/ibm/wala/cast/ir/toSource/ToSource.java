@@ -592,7 +592,7 @@ public abstract class ToSource {
     private final PrunedCFG<SSAInstruction, ISSABasicBlock> cfg;
     private final Set<ISSABasicBlock> loopHeaders;
     private final Set<ISSABasicBlock> loopExits;
-    private final Set<ISSABasicBlock> loopControls;
+    private final Map<ISSABasicBlock, Set<ISSABasicBlock>> loopControls;
     private final Set<Set<ISSABasicBlock>> loops;
     private final SSAInstruction r;
     private final ISSABasicBlock l;
@@ -601,6 +601,8 @@ public abstract class ToSource {
     private BasicNaturalRelation livenessConflicts;
     protected final Map<Integer, String> sourceNames;
     protected final Map<SSAInstruction, Map<ISSABasicBlock, RegionTreeNode>> children =
+        HashMapFactory.make();
+    protected final Map<List<SSAInstruction>, RegionTreeNode> moveAsLoopBody =
         HashMapFactory.make();
 
     protected CAstNode makeVariableName(int vn) {
@@ -840,7 +842,7 @@ public abstract class ToSource {
 
       loops = HashSetFactory.make();
       loopExits = HashSetFactory.make();
-      loopControls = HashSetFactory.make();
+      loopControls = HashMapFactory.make();
       Graph<ISSABasicBlock> cfgNoBack = GraphSlicer.prune(cfg, (p, s) -> !isBackEdge.test(p, s));
       cfg.forEach(
           n -> {
@@ -870,7 +872,7 @@ public abstract class ToSource {
                                   .forEach(sb -> loopExits.add(sb));
                             });
 
-                        loopControls.add(
+                        loopControls.put(
                             loop.stream()
                                 .filter(
                                     bb -> {
@@ -905,7 +907,8 @@ public abstract class ToSource {
                                           - b.getFirstInstructionIndex();
                                     })
                                 .findFirst()
-                                .get());
+                                .get(),
+                            loop);
                       }
                     });
           });
@@ -1167,7 +1170,7 @@ public abstract class ToSource {
                               chunks,
                               unmergeableValues,
                               (inst instanceof SSAConditionalBranchInstruction)
-                                      && loopControls.contains(
+                                      && loopControls.containsKey(
                                           cfg.getBlockForInstruction(inst.iIndex()))
                                       // If it's a while loop then merge instructions in test
                                       // otherwise return null then the instructions will be
@@ -1270,7 +1273,7 @@ public abstract class ToSource {
               },
               unmergeableValues,
               (inst instanceof SSAConditionalBranchInstruction)
-                      && loopControls.contains(cfg.getBlockForInstruction(inst.iIndex()))
+                      && loopControls.containsKey(cfg.getBlockForInstruction(inst.iIndex()))
                   ? inst
                   : null);
       return insts.containsAll(regionInsts);
@@ -1353,14 +1356,25 @@ public abstract class ToSource {
     private boolean isInLoopControl(List<SSAInstruction> chunk) {
       return chunk.stream()
           .map(inst -> cfg.getBlockForInstruction(inst.iIndex()))
-          .anyMatch(bb -> loopControls.contains(bb));
+          .anyMatch(bb -> loopControls.containsKey(bb));
     }
 
     // There are some instructions that's part of loop control block but should be translated
     // as part of loop body. This method is trying to determine if the given chunk
     // is the case
-    private boolean shouldBeLoopBody(List<SSAInstruction> chunk) {
-      return isInLoopControl(chunk) && !isConditional(chunk) && !isAssignment(chunk);
+    private boolean shouldBeLoopBody(List<SSAInstruction> chunk, Set<ISSABasicBlock> loopBlocks) {
+      return isInLoopControl(chunk)
+          ? (!isConditional(chunk) && !isAssignment(chunk))
+          : isBeforeLoopControl(chunk, loopBlocks);
+    }
+
+    private boolean isBeforeLoopControl(
+        List<SSAInstruction> chunk, Set<ISSABasicBlock> loopBlocks) {
+      return chunk.stream()
+          .anyMatch(
+              inst ->
+                  inst.iIndex() > 0
+                      && loopBlocks.contains(cfg.getBlockForInstruction(inst.iIndex())));
     }
 
     // Check if the given chunk contains any instruction that's part of conditional branch
@@ -1373,30 +1387,52 @@ public abstract class ToSource {
       return chunk.stream().allMatch(inst -> inst instanceof AssignInstruction);
     }
 
+    private Set<ISSABasicBlock> getLoopBlocks(List<List<SSAInstruction>> chunks) {
+      Set<ISSABasicBlock> loopBlocks = HashSetFactory.make();
+      for (List<SSAInstruction> chunk : chunks) {
+        for (SSAInstruction inst : chunk) {
+          if (inst.iIndex() > 0) {
+            ISSABasicBlock blockForInstruction = cfg.getBlockForInstruction(inst.iIndex());
+            if (loopControls.containsKey(blockForInstruction)) {
+              loopBlocks.addAll(loopControls.get(blockForInstruction));
+            }
+          }
+        }
+      }
+      return loopBlocks;
+    }
+
     public CAstNode toCAst() {
       CAst ast = new CAstImpl();
       List<CAstNode> elts = new LinkedList<>();
       List<CAstNode> decls = new LinkedList<>();
       List<List<SSAInstruction>> chunks = regionChunks.get(Pair.make(r, l));
+
+      Set<ISSABasicBlock> loopBlocks = getLoopBlocks(chunks);
+
       chunks.forEach(
           chunkInsts -> {
             // Ignore goto chunks as well as the chunks that's part of loop control but
             // should be translated as loop body
-            if (!gotoChunk(chunkInsts) && !shouldBeLoopBody(chunkInsts)) {
-              Pair<CAstNode, List<CAstNode>> stuff =
-                  makeToCAst(chunkInsts).processChunk(decls, packages, false);
-              elts.add(stuff.fst);
-              decls.addAll(stuff.snd);
+            if (!gotoChunk(chunkInsts)) {
+              if (!shouldBeLoopBody(chunkInsts, loopBlocks)) {
+                Pair<CAstNode, List<CAstNode>> stuff =
+                    makeToCAst(chunkInsts).processChunk(decls, packages, false);
+                elts.add(stuff.fst);
+                decls.addAll(stuff.snd);
+              } else moveAsLoopBody.put(chunkInsts, RegionTreeNode.this);
             }
           });
       chunks.stream()
           .filter(this::gotoChunk)
           .forEach(
               c -> {
-                Pair<CAstNode, List<CAstNode>> stuff =
-                    makeToCAst(c).processChunk(decls, packages, false);
-                elts.add(stuff.fst);
-                decls.addAll(stuff.snd);
+                if (!shouldBeLoopBody(c, loopBlocks)) {
+                  Pair<CAstNode, List<CAstNode>> stuff =
+                      makeToCAst(c).processChunk(decls, packages, false);
+                  elts.add(stuff.fst);
+                  decls.addAll(stuff.snd);
+                } else moveAsLoopBody.put(c, RegionTreeNode.this);
               });
       decls.addAll(elts);
       return ast.makeNode(CAstNode.BLOCK_STMT, decls.toArray(new CAstNode[decls.size()]));
@@ -1577,7 +1613,7 @@ public abstract class ToSource {
               logHistory(inst);
               inst.visit(this);
               if (root instanceof SSAConditionalBranchInstruction
-                  && loopControls.contains(cfg.getBlockForInstruction(root.iIndex()))
+                  && loopControls.containsKey(cfg.getBlockForInstruction(root.iIndex()))
                   && inst.hasDef()
                   && du.getNumberOfUses(vn) > 1) {
 
@@ -1605,7 +1641,7 @@ public abstract class ToSource {
         }
 
         private boolean inLoop(ISSABasicBlock bb) {
-          return DFS.getReachableNodes(cdg, loopControls).contains(bb);
+          return DFS.getReachableNodes(cdg, loopControls.keySet()).contains(bb);
         }
 
         @Override
@@ -1901,7 +1937,7 @@ public abstract class ToSource {
                 test = v1;
                 break test;
               } else if (castOp == CAstOperator.OP_EQ) {
-                if (loopControls.contains(branchBB)) {
+                if (loopControls.containsKey(branchBB)) {
                   test = v1;
                 } else {
                   test = ast.makeNode(CAstNode.UNARY_EXPR, CAstOperator.OP_NOT, v1);
@@ -1912,7 +1948,7 @@ public abstract class ToSource {
             test = ast.makeNode(CAstNode.BINARY_EXPR, castOp, v1, v2);
           }
 
-          if (loopControls.contains(branchBB)) {
+          if (loopControls.containsKey(branchBB)) {
             assert cc.size() <= 2;
 
             LoopType loopType = null;
@@ -1924,7 +1960,7 @@ public abstract class ToSource {
               Set<SSAInstruction> bbInsts =
                   IteratorUtil.streamify(branchBB.iterateNormalInstructions())
                       .collect(Collectors.toSet());
-              if (loopControls.contains(branchBB)
+              if (loopControls.containsKey(branchBB)
                   && loopHeaders.contains(branchBB)
                   && covered.containsAll(bbInsts)) {
                 System.err.println("while loop");
@@ -1954,24 +1990,21 @@ public abstract class ToSource {
               test = ast.makeNode(CAstNode.UNARY_EXPR, CAstOperator.OP_NOT, test);
             }
 
+            // add the chucks that should be part of loop body
+            // they are ignored when translating CAst
+            List<CAstNode> loopBlockInLoopControl = new LinkedList<>();
+            if (moveAsLoopBody.size() > 0) {
+              for (List<SSAInstruction> chunk : moveAsLoopBody.keySet()) {
+                RegionTreeNode lr = moveAsLoopBody.get(chunk);
+                List<List<SSAInstruction>> chunkBlock = new LinkedList<>();
+                chunkBlock.add(chunk);
+                loopBlockInLoopControl.addAll(handleBlock(chunkBlock, lr, false));
+              }
+            }
+
             // Chunks in loop body
             List<List<SSAInstruction>> loopChunks = regionChunks.get(Pair.make(instruction, body));
-            // add the chucks belongs to control header but not in conditional branch
-            // they are ignored when translating CAst
-            List<List<SSAInstruction>> loopChunksInLoopControl = new LinkedList<>();
-            List<List<SSAInstruction>> chunks = regionChunks.get(Pair.make(r, l));
-            chunks.forEach(
-                chunkInsts -> {
-                  if (!gotoChunk(chunkInsts) && shouldBeLoopBody(chunkInsts)) {
-                    loopChunksInLoopControl.add(chunkInsts);
-                  }
-                });
-
             RegionTreeNode lr = cc.get(body);
-            List<CAstNode> loopBlockInLoopControl =
-                loopChunksInLoopControl.size() > 0
-                    ? handleBlock(loopChunksInLoopControl, lr, false)
-                    : null;
             List<CAstNode> loopBlock = handleBlock(loopChunks, lr, false);
 
             System.err.println("loop test insts: " + testInsts);
@@ -2024,11 +2057,7 @@ public abstract class ToSource {
             CAstNode bodyNodes = null;
             if (LoopType.DOWHILE.equals(loopType)) {
               // if it's do while loop, use loopBlock and loopBlockInLoopControl
-              if (loopBlockInLoopControl == null) {
-                loopBlockInLoopControl = loopBlock;
-              } else {
-                loopBlockInLoopControl.addAll(loopBlock);
-              }
+              loopBlockInLoopControl.addAll(loopBlock);
               bodyNodes =
                   ast.makeNode(
                       CAstNode.BLOCK_STMT,
@@ -2043,7 +2072,7 @@ public abstract class ToSource {
                       // it should be a block instead of array of AST nodes
                       ast.makeNode(
                           CAstNode.BLOCK_STMT, loopBlock.toArray(new CAstNode[loopBlock.size()])));
-              if (loopBlockInLoopControl == null) {
+              if (loopBlockInLoopControl.size() == 0) {
                 bodyNodes = ast.makeNode(CAstNode.BLOCK_STMT, ifStmt);
               } else {
                 loopBlockInLoopControl.add(ifStmt);
