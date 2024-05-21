@@ -1249,6 +1249,13 @@ public abstract class ToSource {
     private boolean isWhileLoop(SSAInstruction inst, IntSet unmergeableValues) {
       Set<SSAInstruction> insts = HashSetFactory.make();
       List<SSAInstruction> regionInsts = new LinkedList<>();
+      
+      // If it's dowhile, loopHeader should not contains this block
+      ISSABasicBlock bb = cfg.getBlockForInstruction(inst.iIndex());
+      if (!loopHeaders.contains(bb)) {
+        return false;
+      }
+
       cfg.getBlockForInstruction(inst.iIndex())
           .forEach(
               iinst -> {
