@@ -147,8 +147,7 @@ public abstract class ToSource {
         || (inst instanceof SSAUnaryOpInstruction)
         || (inst instanceof SSAComparisonInstruction)
         || (inst instanceof SSAConversionInstruction)
-        || (inst instanceof SSAUnspecifiedExprInstruction)
-    ) {
+        || (inst instanceof SSAUnspecifiedExprInstruction)) {
       return true;
     } else if (inst instanceof SSAAbstractInvokeInstruction) {
       MethodReference method = ((SSAAbstractInvokeInstruction) inst).getDeclaredTarget();
@@ -592,6 +591,8 @@ public abstract class ToSource {
     private final PrunedCFG<SSAInstruction, ISSABasicBlock> cfg;
     private final Set<ISSABasicBlock> loopHeaders;
     private final Set<ISSABasicBlock> loopExits;
+    // The blocks that will got outside of the loop, might includes loop control
+    private final Set<ISSABasicBlock> loopBreakers;
     private final Map<ISSABasicBlock, Set<ISSABasicBlock>> loopControls;
     private final Set<Set<ISSABasicBlock>> loops;
     private final SSAInstruction r;
@@ -665,6 +666,7 @@ public abstract class ToSource {
       this.cfg = parent.cfg;
       this.loopHeaders = parent.loopHeaders;
       this.loopExits = parent.loopExits;
+      this.loopBreakers = parent.loopBreakers;
       this.loopControls = parent.loopControls;
       this.livenessConflicts = parent.livenessConflicts;
       this.cdg = parent.cdg;
@@ -842,6 +844,7 @@ public abstract class ToSource {
 
       loops = HashSetFactory.make();
       loopExits = HashSetFactory.make();
+      loopBreakers = HashSetFactory.make();
       loopControls = HashMapFactory.make();
       Graph<ISSABasicBlock> cfgNoBack = GraphSlicer.prune(cfg, (p, s) -> !isBackEdge.test(p, s));
       cfg.forEach(
@@ -872,7 +875,7 @@ public abstract class ToSource {
                                   .forEach(sb -> loopExits.add(sb));
                             });
 
-                        loopControls.put(
+                        loopBreakers.addAll(
                             loop.stream()
                                 .filter(
                                     bb -> {
@@ -906,9 +909,9 @@ public abstract class ToSource {
                                       return a.getFirstInstructionIndex()
                                           - b.getFirstInstructionIndex();
                                     })
-                                .findFirst()
-                                .get(),
-                            loop);
+                                .collect(Collectors.toSet()));
+                        assert (loopBreakers.size() > 0);
+                        loopControls.put(loopBreakers.iterator().next(), loop);
                       }
                     });
           });
@@ -1648,14 +1651,14 @@ public abstract class ToSource {
         }
 
         private boolean inLoop(ISSABasicBlock bb) {
-          return DFS.getReachableNodes(cdg, loopControls.keySet()).contains(bb);
+          return loopControls.values().stream().anyMatch(blocks -> blocks.contains(bb));
         }
 
         @Override
         public void visitGoto(SSAGotoInstruction inst) {
           ISSABasicBlock bb = cfg.getBlockForInstruction(inst.iIndex());
           if (loopHeaders.containsAll(cfg.getNormalSuccessors(bb))) {
-            // node = ast.makeNode(CAstNode.CONTINUE);
+            node = ast.makeNode(CAstNode.CONTINUE);
           } else if (loopExits.containsAll(cfg.getNormalSuccessors(bb)) && inLoop(bb)) {
             node = ast.makeNode(CAstNode.BLOCK_STMT, ast.makeNode(CAstNode.BREAK));
           } else {
@@ -2144,6 +2147,10 @@ public abstract class ToSource {
             } else {
               assert cc.size() == 1;
               notTaken = cc.keySet().iterator().next();
+
+              if (loopBreakers.contains(branchBB)) {
+                takenBlock = Collections.singletonList(ast.makeNode(CAstNode.BREAK));
+              }
             }
             assert notTaken != null;
 
