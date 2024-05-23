@@ -129,7 +129,7 @@ public class TestSourceBuffer {
             + INDENT
             + "GO TO END-PROGRAM.");
   }
-  
+
   @Test
   public void testSingleLineOmitPeriod() throws IOException {
     // position of "ACCEPT WS-INPUT" [2:12] -> [2:26] (1-base indexing)

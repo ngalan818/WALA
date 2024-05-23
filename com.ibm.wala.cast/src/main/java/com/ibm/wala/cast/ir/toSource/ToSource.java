@@ -1252,7 +1252,7 @@ public abstract class ToSource {
     private boolean isWhileLoop(SSAInstruction inst, IntSet unmergeableValues) {
       Set<SSAInstruction> insts = HashSetFactory.make();
       List<SSAInstruction> regionInsts = new LinkedList<>();
-      
+
       // If it's dowhile, loopHeader should not contains this block
       ISSABasicBlock bb = cfg.getBlockForInstruction(inst.iIndex());
       if (!loopHeaders.contains(bb)) {
@@ -2147,10 +2147,6 @@ public abstract class ToSource {
             } else {
               assert cc.size() == 1;
               notTaken = cc.keySet().iterator().next();
-
-              if (loopBreakers.contains(branchBB)) {
-                takenBlock = Collections.singletonList(ast.makeNode(CAstNode.BREAK));
-              }
             }
             assert notTaken != null;
 
@@ -2159,6 +2155,12 @@ public abstract class ToSource {
             List<List<SSAInstruction>> notTakenChunks = regionChunks.get(notTakenKey);
             RegionTreeNode fr = cc.get(notTaken);
             List<CAstNode> notTakenBlock = handleBlock(notTakenChunks, fr, false);
+
+            // There's a case where break node should be added
+            if (loopBreakers.contains(branchBB) && loopExits.contains(notTaken)) {
+              // TODO: do we need to add it always or only need it for several cases?
+              notTakenBlock.add(ast.makeNode(CAstNode.BREAK));
+            }
 
             CAstNode notTakenStmt =
                 notTakenBlock.size() == 1
@@ -2169,6 +2171,16 @@ public abstract class ToSource {
 
             notTakenStmt = checkLinePhi(notTakenStmt, instruction, notTaken);
 
+            // There's a case where break node should be added
+            // TODO: should only apply to some cases, need to identify which case need this change
+            if (loopBreakers.contains(branchBB)) {
+              if (takenBlock == null) // In julian04 sample this is needed
+              takenBlock = Collections.singletonList(ast.makeNode(CAstNode.BREAK));
+              else if (loopExits.contains(taken)) {
+                takenBlock.add(ast.makeNode(CAstNode.BREAK));
+              }
+            }
+
             CAstNode takenStmt = null;
             if (takenBlock != null) {
               takenStmt =
@@ -2177,6 +2189,7 @@ public abstract class ToSource {
                       : ast.makeNode(
                           CAstNode.BLOCK_STMT, takenBlock.toArray(new CAstNode[takenBlock.size()]));
             }
+
             takenStmt = checkLinePhi(takenStmt, instruction, taken);
 
             if (takenStmt != null) {

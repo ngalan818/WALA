@@ -400,7 +400,7 @@ public class JavaLanguage extends LanguageImpl implements BytecodeLanguage, Cons
 
     @Override
     public <T> SSAUnspecifiedExprInstruction<T> UnspecifiedExprInstruction(
-            int iindex, int result, TypeReference resultType, T payload) {
+        int iindex, int result, TypeReference resultType, T payload) {
       return new SSAUnspecifiedExprInstruction<>(iindex, result, resultType, payload);
     }
 
