@@ -107,6 +107,7 @@ import java.io.StringWriter;
 import java.io.UTFDataFormatException;
 import java.util.Collection;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedList;
@@ -911,7 +912,12 @@ public abstract class ToSource {
                                     })
                                 .collect(Collectors.toSet()));
                         assert (loopBreakers.size() > 0);
-                        loopControls.put(loopBreakers.iterator().next(), loop);
+                        // Pick the first one - the one with smallest number
+                        loopControls.put(
+                            loopBreakers.stream()
+                                .min(Comparator.comparing(ISSABasicBlock::getNumber))
+                                .get(),
+                            loop);
                       }
                     });
           });
@@ -2156,10 +2162,20 @@ public abstract class ToSource {
             RegionTreeNode fr = cc.get(notTaken);
             List<CAstNode> notTakenBlock = handleBlock(notTakenChunks, fr, false);
 
-            // There's a case where break node should be added
-            if (loopBreakers.contains(branchBB) && loopExits.contains(notTaken)) {
-              // TODO: do we need to add it always or only need it for several cases?
-              notTakenBlock.add(ast.makeNode(CAstNode.BREAK));
+            // For the case where there's a need to jump out of the loop, break should be added
+            // if notTakenBlock is empty (or have not have goto at the last?), add break
+            // if takenBlock is null, add break
+            // if takenBlock is not null, add break (or have goto at last?)
+            if (loopBreakers.contains(branchBB)
+                && !loopControls.containsKey(branchBB)
+                && !loopHeaders.contains(branchBB)) {
+              if (loopExits.contains(notTaken)) {
+                if (notTakenBlock.size() < 1) notTakenBlock.add(ast.makeNode(CAstNode.BREAK));
+              } else {
+                if (takenBlock == null)
+                  takenBlock = Collections.singletonList(ast.makeNode(CAstNode.BREAK));
+                else takenBlock.add(ast.makeNode(CAstNode.BREAK));
+              }
             }
 
             CAstNode notTakenStmt =
@@ -2170,16 +2186,6 @@ public abstract class ToSource {
                         notTakenBlock.toArray(new CAstNode[notTakenBlock.size()]));
 
             notTakenStmt = checkLinePhi(notTakenStmt, instruction, notTaken);
-
-            // There's a case where break node should be added
-            // TODO: should only apply to some cases, need to identify which case need this change
-            if (loopBreakers.contains(branchBB)) {
-              if (takenBlock == null) // In julian04 sample this is needed
-              takenBlock = Collections.singletonList(ast.makeNode(CAstNode.BREAK));
-              else if (loopExits.contains(taken)) {
-                takenBlock.add(ast.makeNode(CAstNode.BREAK));
-              }
-            }
 
             CAstNode takenStmt = null;
             if (takenBlock != null) {
