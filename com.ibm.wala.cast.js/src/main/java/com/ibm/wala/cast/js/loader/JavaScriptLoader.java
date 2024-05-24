@@ -699,7 +699,8 @@ public class JavaScriptLoader extends CAstAbstractModuleLoader {
             }
 
             @Override
-            public <T> SSAUnspecifiedExprInstruction<T> UnspecifiedExprInstruction(int iindex, int result, TypeReference resultType, T payload) {
+            public <T> SSAUnspecifiedExprInstruction<T> UnspecifiedExprInstruction(
+                int iindex, int result, TypeReference resultType, T payload) {
               throw new UnsupportedOperationException("Unimplemented!");
             }
 
