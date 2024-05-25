@@ -1663,7 +1663,7 @@ public abstract class ToSource {
         @Override
         public void visitGoto(SSAGotoInstruction inst) {
           ISSABasicBlock bb = cfg.getBlockForInstruction(inst.iIndex());
-          if (loopHeaders.containsAll(cfg.getNormalSuccessors(bb))) {
+          if (loopHeaders.containsAll(cfg.getNormalSuccessors(bb)) && inLoop(bb)) {
             node = ast.makeNode(CAstNode.CONTINUE);
           } else if (loopExits.containsAll(cfg.getNormalSuccessors(bb)) && inLoop(bb)) {
             node = ast.makeNode(CAstNode.BLOCK_STMT, ast.makeNode(CAstNode.BREAK));
@@ -2898,6 +2898,12 @@ public abstract class ToSource {
           {
             indent();
             out.println("break;");
+            return true;
+          }
+        case CAstNode.CONTINUE:
+          {
+            indent();
+            out.println("continue;");
             return true;
           }
         default:
