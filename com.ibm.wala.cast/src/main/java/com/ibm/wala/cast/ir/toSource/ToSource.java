@@ -1663,7 +1663,7 @@ public abstract class ToSource {
         @Override
         public void visitGoto(SSAGotoInstruction inst) {
           ISSABasicBlock bb = cfg.getBlockForInstruction(inst.iIndex());
-          if (loopHeaders.containsAll(cfg.getNormalSuccessors(bb))) {
+          if (loopHeaders.containsAll(cfg.getNormalSuccessors(bb)) && inLoop(bb)) {
             node = ast.makeNode(CAstNode.CONTINUE);
           } else if (loopExits.containsAll(cfg.getNormalSuccessors(bb)) && inLoop(bb)) {
             node = ast.makeNode(CAstNode.BLOCK_STMT, ast.makeNode(CAstNode.BREAK));
@@ -2163,14 +2163,14 @@ public abstract class ToSource {
             List<CAstNode> notTakenBlock = handleBlock(notTakenChunks, fr, false);
 
             // For the case where there's a need to jump out of the loop, break should be added
-            // if notTakenBlock is empty (or have not have goto at the last?), add break
+            // if notTakenBlock is selected (or have goto at the last?), add break
             // if takenBlock is null, add break
             // if takenBlock is not null, add break (or have goto at last?)
             if (loopBreakers.contains(branchBB)
                 && !loopControls.containsKey(branchBB)
                 && !loopHeaders.contains(branchBB)) {
               if (loopExits.contains(notTaken)) {
-                if (notTakenBlock.size() < 1) notTakenBlock.add(ast.makeNode(CAstNode.BREAK));
+                notTakenBlock.add(ast.makeNode(CAstNode.BREAK));
               } else {
                 if (takenBlock == null)
                   takenBlock = Collections.singletonList(ast.makeNode(CAstNode.BREAK));
@@ -2898,6 +2898,12 @@ public abstract class ToSource {
           {
             indent();
             out.println("break;");
+            return true;
+          }
+        case CAstNode.CONTINUE:
+          {
+            indent();
+            out.println("continue;");
             return true;
           }
         default:
