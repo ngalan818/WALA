@@ -2080,11 +2080,31 @@ public abstract class ToSource {
                       loopBlockInLoopControl.toArray(new CAstNode[loopBlockInLoopControl.size()]));
             } else if (LoopType.WHILETRUE.equals(loopType)) {
               // if it's ugly loop, put test as if-statement into body
+
+              // retrieve else statement
+              Set<ISSABasicBlock> elseBlock = HashSetFactory.make(loopExits);
+              elseBlock.retainAll(cc.keySet());
+              List<CAstNode> elseNodes = null;
+              if (elseBlock.size() > 0) {
+                RegionTreeNode rt = cc.get(elseBlock.iterator().next());
+                List<List<SSAInstruction>> elseChunks =
+                    regionChunks.get(Pair.make(instruction, elseBlock.iterator().next()));
+                elseNodes = handleBlock(elseChunks, rt, false);
+                elseNodes.add(ast.makeNode(CAstNode.BREAK));
+              }
+
               CAstNode ifStmt =
                   ast.makeNode(
                       CAstNode.IF_STMT,
                       ast.makeNode(CAstNode.UNARY_EXPR, CAstOperator.OP_NOT, test),
-                      ast.makeNode(CAstNode.BREAK),
+                      // include the nodes in the else branch
+                      elseNodes == null
+                          ? ast.makeNode(CAstNode.BREAK)
+                          : (elseNodes.size() == 1
+                              ? elseNodes.get(0)
+                              : ast.makeNode(
+                                  CAstNode.BLOCK_STMT,
+                                  elseNodes.toArray(new CAstNode[elseNodes.size()]))),
                       // it should be a block instead of array of AST nodes
                       ast.makeNode(
                           CAstNode.BLOCK_STMT, loopBlock.toArray(new CAstNode[loopBlock.size()])));
