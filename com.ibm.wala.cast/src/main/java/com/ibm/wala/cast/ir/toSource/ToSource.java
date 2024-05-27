@@ -1999,6 +1999,9 @@ public abstract class ToSource {
             // Find out the successor of the loop control block
             ISSABasicBlock body = getLoopSuccessor(branchBB);
 
+            // For the 'after' block that should be moved into loop
+            ISSABasicBlock loopControlElse = null;
+
             ISSABasicBlock nextBB = cfg.getBlockForInstruction(instruction.iIndex() + 1);
             // If successor is not the next block
             if (!nextBB.equals(body)) {
@@ -2086,9 +2089,12 @@ public abstract class ToSource {
               elseBlock.retainAll(cc.keySet());
               List<CAstNode> elseNodes = null;
               if (elseBlock.size() > 0) {
-                RegionTreeNode rt = cc.get(elseBlock.iterator().next());
+                loopControlElse = elseBlock.iterator().next();
+              }
+              if (loopControlElse != null) {
+                RegionTreeNode rt = cc.get(loopControlElse);
                 List<List<SSAInstruction>> elseChunks =
-                    regionChunks.get(Pair.make(instruction, elseBlock.iterator().next()));
+                    regionChunks.get(Pair.make(instruction, loopControlElse));
                 elseNodes = handleBlock(elseChunks, rt, false);
                 elseNodes.add(ast.makeNode(CAstNode.BREAK));
               }
@@ -2145,16 +2151,19 @@ public abstract class ToSource {
               ISSABasicBlock after = copy.keySet().iterator().next();
               assert after != null;
 
-              List<List<SSAInstruction>> afterChunks =
-                  regionChunks.get(Pair.make(instruction, after));
-              RegionTreeNode ar = cc.get(after);
-              List<CAstNode> afterBlock = handleBlock(afterChunks, ar, false);
+              // skip the case when 'after' block is moved into loop body
+              if (!after.equals(loopControlElse)) {
+                List<List<SSAInstruction>> afterChunks =
+                    regionChunks.get(Pair.make(instruction, after));
+                RegionTreeNode ar = cc.get(after);
+                List<CAstNode> afterBlock = handleBlock(afterChunks, ar, false);
 
-              node =
-                  ast.makeNode(
-                      CAstNode.BLOCK_STMT,
-                      node,
-                      afterBlock.toArray(new CAstNode[afterBlock.size()]));
+                node =
+                    ast.makeNode(
+                        CAstNode.BLOCK_STMT,
+                        node,
+                        afterBlock.toArray(new CAstNode[afterBlock.size()]));
+              }
             }
           } else {
             List<CAstNode> takenBlock = null;
