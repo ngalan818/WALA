@@ -1955,19 +1955,21 @@ public abstract class ToSource {
           return test;
         }
 
-        /**
-         * Remove redundant negation from test node and single branch.
-         * Even or zero negation count: all negation can be removed.
-         * Odd count: must remove all but one.
-         */
+
         private CAstNode makeIfStmt(CAstNode test, CAstNode thenBranch) {
           return ast.makeNode(CAstNode.IF_STMT, stableRemoveLeadingNegation(test), thenBranch);
         }
 
         /**
          * Remove redundant negation from test node and single branch.
-         * Even or zero negation count: all negation can be removed.
-         * Odd count: remove negation and flip branches.
+         * <ul>
+         * <li>Even or zero negation count: all negation can be removed.</li>
+         * <li>Odd count: remove negation and flip branches.</li>
+         * </ul>
+         * @param test The test node for the if-stmt to be created. May contain leading negation.
+         * @param thenBranch The 'true' branch of the if-stmt. May be flipped with the else branch if negation count is odd.
+         * @param elseBranch The 'false' branch of the if-stmt. May be flipped with the then branch if negation count is odd.
+         * @return A CAstNode of type IF_STMT equivalent to (if test thenBranch elseBranch), with leading negation removed from test and possible then/else branches swapped.
          */
         private CAstNode makeIfStmt(CAstNode test, CAstNode thenBranch, CAstNode elseBranch) {
           Pair<Integer,CAstNode> countAndTest = countAndRemoveLeadingNegation(test);
@@ -1978,6 +1980,11 @@ public abstract class ToSource {
           }
         }
 
+        /**
+         * Counts leading negation and removes it from the input node. Then returns a pair with this information.
+         * @param n The input node.
+         * @return A pair with first element count, and second element n, but with all leading negation removed.
+         */
         private Pair<Integer,CAstNode> countAndRemoveLeadingNegation(CAstNode n) {
           int count = 0;
           CAstNode tmp = n;
@@ -1999,6 +2006,11 @@ public abstract class ToSource {
                   n.getChild(0) == CAstOperator.OP_NOT;
         }
 
+        /**
+         * Remove redundant negation from predicate node and single branch.
+         * Even or zero negation count: all negation can be removed.
+         * Odd count: must remove all but one.
+         */
         private CAstNode stableRemoveLeadingNegation(CAstNode pred) {
           Pair<Integer,CAstNode> countAndPred = countAndRemoveLeadingNegation(pred);
           if (countAndPred.fst % 2 == 0) {
