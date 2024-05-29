@@ -1961,7 +1961,7 @@ public abstract class ToSource {
         }
 
         /**
-         * Remove redundant negation from test node and single branch.
+         * Remove redundant negation from test node.
          * <ul>
          * <li>Even or zero negation count: all negation can be removed.</li>
          * <li>Odd count: remove negation and flip branches.</li>
@@ -2007,9 +2007,13 @@ public abstract class ToSource {
         }
 
         /**
-         * Remove redundant negation from predicate node and single branch.
-         * Even or zero negation count: all negation can be removed.
-         * Odd count: must remove all but one.
+         * Remove redundant negation from test node.
+         * <ul>
+         * <li>Even or zero negation count: all negation can be removed.</li>
+         * <li>Odd count: remove negation and flip branches.</li>
+         * </ul>
+         * @param pred The node from which negation should be removed.
+         * @return The input node, with pairs of leading negation removed.
          */
         private CAstNode stableRemoveLeadingNegation(CAstNode pred) {
           Pair<Integer,CAstNode> countAndPred = countAndRemoveLeadingNegation(pred);
