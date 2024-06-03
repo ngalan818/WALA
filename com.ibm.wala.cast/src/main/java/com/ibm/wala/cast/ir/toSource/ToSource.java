@@ -1906,14 +1906,7 @@ public abstract class ToSource {
           return loopBB;
         }
 
-        @Override
-        public void visitConditionalBranch(SSAConditionalBranchInstruction instruction) {
-          assert children.containsKey(instruction) : "children of " + instruction + ":" + children;
-          Map<ISSABasicBlock, RegionTreeNode> cc = children.get(instruction);
-          SSACFG.BasicBlock branchBB =
-              (BasicBlock) cfg.getBlockForInstruction(instruction.iIndex());
-
-          Set<SSAInstruction> testInsts;
+        private CAstNode getInitialTestNode(SSAConditionalBranchInstruction instruction, CAstNode v2, CAstNode v1, BasicBlock branchBB) {
           CAstOperator castOp = null;
           IConditionalBranchInstruction.IOperator op = instruction.getOperator();
           if (op instanceof IConditionalBranchInstruction.Operator) {
@@ -1944,10 +1937,6 @@ public abstract class ToSource {
           CAstNode test;
           test:
           {
-            startLog();
-            CAstNode v1 = visit(instruction.getUse(0));
-            CAstNode v2 = visit(instruction.getUse(1));
-            testInsts = endLog();
             if (v2.getValue() instanceof Number && ((Number) v2.getValue()).equals(0)) {
               if (castOp == CAstOperator.OP_NE) {
                 test = v1;
@@ -1963,6 +1952,92 @@ public abstract class ToSource {
             }
             test = ast.makeNode(CAstNode.BINARY_EXPR, castOp, v1, v2);
           }
+          return test;
+        }
+
+
+        private CAstNode makeIfStmt(CAstNode test, CAstNode thenBranch) {
+          return ast.makeNode(CAstNode.IF_STMT, stableRemoveLeadingNegation(test), thenBranch);
+        }
+
+        /**
+         * Remove redundant negation from test node.
+         * <ul>
+         * <li>Even or zero negation count: all negation can be removed.</li>
+         * <li>Odd count: remove negation and flip branches.</li>
+         * </ul>
+         * @param test The test node for the if-stmt to be created. May contain leading negation.
+         * @param thenBranch The 'true' branch of the if-stmt. May be flipped with the else branch if negation count is odd.
+         * @param elseBranch The 'false' branch of the if-stmt. May be flipped with the then branch if negation count is odd.
+         * @return A CAstNode of type IF_STMT equivalent to (if test thenBranch elseBranch), with leading negation removed from test and possible then/else branches swapped.
+         */
+        private CAstNode makeIfStmt(CAstNode test, CAstNode thenBranch, CAstNode elseBranch) {
+          Pair<Integer,CAstNode> countAndTest = countAndRemoveLeadingNegation(test);
+          if (countAndTest.fst % 2 == 0) {
+            return ast.makeNode(CAstNode.IF_STMT, countAndTest.snd, thenBranch, elseBranch);
+          } else {
+            return ast.makeNode(CAstNode.IF_STMT, countAndTest.snd, elseBranch, thenBranch);
+          }
+        }
+
+        /**
+         * Counts leading negation and removes it from the input node. Then returns a pair with this information.
+         * @param n The input node.
+         * @return A pair with first element count, and second element n, but with all leading negation removed.
+         */
+        private Pair<Integer,CAstNode> countAndRemoveLeadingNegation(CAstNode n) {
+          int count = 0;
+          CAstNode tmp = n;
+          while (isLeadingNegation(tmp)) {
+            count++;
+            tmp = removeSingleNegation(tmp);
+          }
+          return Pair.make(count, tmp);
+        }
+
+        private CAstNode removeSingleNegation(CAstNode n) {
+          assert (isLeadingNegation(n)) : "Expected node with leading negation " + n;
+          return n.getChild(1);
+        }
+
+        private boolean isLeadingNegation(CAstNode n) {
+          return n.getKind() == CAstNode.UNARY_EXPR &&
+                  n.getChildCount() > 1 &&
+                  n.getChild(0) == CAstOperator.OP_NOT;
+        }
+
+        /**
+         * Remove redundant negation from test node.
+         * <ul>
+         * <li>Even or zero negation count: all negation can be removed.</li>
+         * <li>Odd count: remove negation and flip branches.</li>
+         * </ul>
+         * @param pred The node from which negation should be removed.
+         * @return The input node, with pairs of leading negation removed.
+         */
+        private CAstNode stableRemoveLeadingNegation(CAstNode pred) {
+          Pair<Integer,CAstNode> countAndPred = countAndRemoveLeadingNegation(pred);
+          if (countAndPred.fst % 2 == 0) {
+            return countAndPred.snd;
+          } else /* odd negation count (at least one) */ {
+            return ast.makeNode(CAstNode.UNARY_EXPR, CAstOperator.OP_NOT, countAndPred.snd);
+          }
+        }
+
+        @Override
+        public void visitConditionalBranch(SSAConditionalBranchInstruction instruction) {
+          assert children.containsKey(instruction) : "children of " + instruction + ":" + children;
+          Map<ISSABasicBlock, RegionTreeNode> cc = children.get(instruction);
+          SSACFG.BasicBlock branchBB =
+              (BasicBlock) cfg.getBlockForInstruction(instruction.iIndex());
+
+          Set<SSAInstruction> testInsts;
+          startLog();
+          CAstNode v1 = visit(instruction.getUse(0));
+          CAstNode v2 = visit(instruction.getUse(1));
+          testInsts = endLog();
+
+          CAstNode test = getInitialTestNode(instruction, v2, v1, branchBB);
 
           if (loopControls.containsKey(branchBB)) {
             assert cc.size() <= 2;
@@ -2099,21 +2174,18 @@ public abstract class ToSource {
                 elseNodes.add(ast.makeNode(CAstNode.BREAK));
               }
 
-              CAstNode ifStmt =
-                  ast.makeNode(
-                      CAstNode.IF_STMT,
-                      ast.makeNode(CAstNode.UNARY_EXPR, CAstOperator.OP_NOT, test),
+              CAstNode ifStmt = makeIfStmt(ast.makeNode(CAstNode.UNARY_EXPR, CAstOperator.OP_NOT, test),
                       // include the nodes in the else branch
                       elseNodes == null
-                          ? ast.makeNode(CAstNode.BREAK)
-                          : (elseNodes.size() == 1
+                              ? ast.makeNode(CAstNode.BREAK)
+                              : (elseNodes.size() == 1
                               ? elseNodes.get(0)
                               : ast.makeNode(
-                                  CAstNode.BLOCK_STMT,
-                                  elseNodes.toArray(new CAstNode[elseNodes.size()]))),
+                              CAstNode.BLOCK_STMT,
+                              elseNodes.toArray(new CAstNode[elseNodes.size()]))),
                       // it should be a block instead of array of AST nodes
                       ast.makeNode(
-                          CAstNode.BLOCK_STMT, loopBlock.toArray(new CAstNode[loopBlock.size()])));
+                              CAstNode.BLOCK_STMT, loopBlock.toArray(new CAstNode[loopBlock.size()])));
               if (loopBlockInLoopControl.size() == 0) {
                 bodyNodes = ast.makeNode(CAstNode.BLOCK_STMT, ifStmt);
               } else {
@@ -2136,7 +2208,7 @@ public abstract class ToSource {
             node =
                 ast.makeNode(
                     CAstNode.LOOP,
-                    test,
+                    stableRemoveLeadingNegation(test),
                     bodyNodes,
                     // reuse LOOP type but add third child as a boolean to tell if it's a do while
                     // loop
@@ -2228,13 +2300,9 @@ public abstract class ToSource {
             takenStmt = checkLinePhi(takenStmt, instruction, taken);
 
             if (takenStmt != null) {
-              node = ast.makeNode(CAstNode.IF_STMT, test, takenStmt, notTakenStmt);
+              node = makeIfStmt(test, takenStmt, notTakenStmt);
             } else {
-              node =
-                  ast.makeNode(
-                      CAstNode.IF_STMT,
-                      ast.makeNode(CAstNode.UNARY_EXPR, CAstOperator.OP_NOT, test),
-                      notTakenStmt);
+              node = makeIfStmt(ast.makeNode(CAstNode.UNARY_EXPR, CAstOperator.OP_NOT, test), notTakenStmt);
             }
           }
         }
@@ -2557,6 +2625,7 @@ public abstract class ToSource {
       }
     }
   }
+
 
   protected class ToJavaVisitor extends CAstVisitor<CodeGenerationContext> {
     private final IR ir;
